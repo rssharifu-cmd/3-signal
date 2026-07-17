@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Signal — personalized AI news digest delivered daily." />
+  <title>Signal — Your AI reads the internet for you</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+</head>
+<body>
+
+<!-- Landing -->
+<div id="landing-view">
+  <nav class="nav">
+    <div class="nav-logo">Signal<em>.</em></div>
+    <div class="nav-actions">
+      <button class="btn btn-ghost" onclick="openAuthModal('login')">Sign in</button>
+      <button class="btn btn-primary" onclick="openAuthModal('signup')">Get started</button>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <div class="hero-eyebrow">Personal intelligence, not generic news</div>
+    <h1>Your morning brief,<br/><span>built only for you.</span></h1>
+    <p class="hero-lead">Signal learns your role, topics, and noise filters — then curates real stories from live sources into one focused digest.</p>
+    <div class="hero-actions">
+      <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
+      <button class="btn btn-secondary btn-lg" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">How it works</button>
+    </div>
+
+    <div class="preview-card">
+      <div class="preview-bar">Your Signal · Today, 8:00 AM</div>
+      <div class="preview-body">
+        <div class="preview-item">
+          <strong>OpenAI ships reasoning model — impact on your PM workflow</strong>
+          <span>Matched to AI &amp; product · via TechCrunch</span>
+        </div>
+        <div class="preview-item">
+          <strong>Lenny Rachitsky: How agents replace SaaS (38 min)</strong>
+          <span>Skip to 12:30 · matched to your startup focus</span>
+        </div>
+        <div class="preview-item">
+          <strong>One action: Audit one repetitive task for agent automation</strong>
+          <span>Tailored to your stated goal this week</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt" id="features">
+    <div class="section-inner">
+      <p class="section-label">Why Signal</p>
+      <h2 class="section-title">Signal, not noise</h2>
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>Guided onboarding</h3>
+          <p>Five-step profile setup in under 90 seconds — role, topics, and news preferences tuned to you.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Live source pipeline</h3>
+          <p>Tavily search, RSS, Reddit, and YouTube feed real articles into your digest — not hallucinated headlines.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Professional dashboard</h3>
+          <p>View your latest digest, review your profile, and track what Signal is learning about you.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Always improving</h3>
+          <p>Reset your profile anytime. Signal learns what matters to you with every digest.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>© 2026 Signal · Personalized digest platform</p>
+  </footer>
+</div>
+
+<!-- Auth modal -->
+<div class="modal-overlay" id="auth-modal">
+  <div class="modal-card">
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tab-signup" onclick="switchAuthTab('signup')">Create account</button>
+      <button class="auth-tab" id="tab-login" onclick="switchAuthTab('login')">Sign in</button>
+    </div>
+    <div id="auth-signup-form">
+      <h2 style="font-family:var(--serif);font-size:1.5rem;margin-bottom:6px;">Start your trial</h2>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:20px;">3 days free · no card required</p>
+      <div class="form-group"><label>Full name</label><input type="text" id="auth-name" placeholder="Your name" /></div>
+      <div class="form-group"><label>Email</label><input type="email" id="auth-email" placeholder="you@company.com" /></div>
+      <div class="form-group"><label>Password</label><input type="password" id="auth-pass" placeholder="Min 6 characters" /></div>
+      <button class="btn btn-primary btn-block" onclick="handleSignup()">Create Account →</button>
+    </div>
+    <div id="auth-login-form" class="hidden">
+      <h2 style="font-family:var(--serif);font-size:1.5rem;margin-bottom:6px;">Welcome back</h2>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:20px;">Sign in to your dashboard</p>
+      <div class="form-group"><label>Email</label><input type="email" id="login-email" placeholder="you@company.com" /></div>
+      <div class="form-group"><label>Password</label><input type="password" id="login-pass" placeholder="Password" /></div>
+      <button class="btn btn-primary btn-block" onclick="handleLogin()">Sign In →</button>
+    </div>
+    <p style="text-align:center;margin-top:16px;"><a href="#" onclick="closeAuthModal();return false;" style="font-size:13px;color:var(--dim);">← Back</a></p>
+  </div>
+</div>
+
+<!-- App shell -->
+<div id="app-shell">
+  <header class="app-topbar">
+    <div>
+      <span class="app-topbar-title">Signal.</span>
+      <span class="app-badge" id="phase-label">Setup</span>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="resetAll()">Reset</button>
+  </header>
+
+  <!-- Onboarding conversational AI chat -->
+  <div id="onboarding-view" class="onboard-wrap hidden">
+    <div class="chat-layout" style="height: calc(100vh - 56px); display: flex; flex-direction: column;">
+      <!-- Conversational Progress Bar -->
+      <div id="onboard-progress-bar-container" style="background: var(--surface-1); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;">
+        <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">Modeling your digest profile</span>
+        <div style="width: 120px; background: var(--surface-3); height: 6px; border-radius: 3px; overflow: hidden; position: relative;">
+          <div id="conversational-progress-fill" style="position: absolute; left: 0; top: 0; bottom: 0; width: 20%; background: var(--primary); transition: width 0.4s ease;"></div>
+        </div>
+      </div>
+      <div id="onboard-chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto;">
+        <div id="onboard-chat-inner" class="chat-messages-inner" style="max-width: 680px; margin: 0 auto; width: 100%;">
+          <!-- Chat messages dynamically rendered here -->
+        </div>
+      </div>
+      <div class="chat-input-bar">
+        <div class="chat-input-inner">
+          <textarea id="onboard-chat-input" placeholder="Type your response... (Press Enter to send)" rows="1" onkeydown="handleOnboardChatKey(event)"></textarea>
+          <button class="btn btn-primary" id="btn-onboard-chat-send" onclick="sendOnboardChatMessage()" style="border-radius: 24px; padding: 12px 20px;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <input type="hidden" id="pf-name" />
+
+  <!-- Dashboard -->
+  <div id="dashboard-view" class="dash-layout hidden">
+    <aside class="dash-sidebar">
+      <button class="dash-nav-item active" data-panel="overview" onclick="dashNav('overview')">Overview</button>
+      <button class="dash-nav-item" data-panel="digest" onclick="dashNav('digest')">Today's digest</button>
+      <button class="dash-nav-item" data-panel="profile" onclick="dashNav('profile')">Profile</button>
+    </aside>
+
+    <main class="dash-main">
+      <!-- Overview -->
+      <div class="dash-panel" id="panel-overview">
+        <div class="dash-header">
+          <h1 id="dash-greeting">Good afternoon</h1>
+          <p>Your daily intelligence brief arrives every morning. Next edition coming tomorrow.</p>
+        </div>
+        <div class="dash-grid">
+          <div class="dash-card span-2">
+            <div class="dash-card-head">
+              <h3>Latest digest</h3>
+            </div>
+            <div class="digest-panel">
+              <div id="digest-output" class="digest-content empty">Loading…</div>
+              <p class="source-badge" id="digest-source-note"></p>
+            </div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-card-head"><h3>Quick profile</h3></div>
+            <div class="profile-row"><span class="label">Role</span><span id="dp-profession">—</span></div>
+            <div class="profile-row"><span class="label">Goal</span><span id="dp-goal">—</span></div>
+            <div class="profile-row"><span class="label">Topics</span><div class="profile-tags" id="dp-tags"></div></div>
+            <div class="profile-row"><span class="label">Scope</span><span id="dp-scope">—</span></div>
+          </div>
+          <div class="dash-card">
+            <div class="dash-card-head"><h3>Filters</h3></div>
+            <div class="profile-row"><span class="label">Avoid</span><span id="dp-avoid">—</span></div>
+            <div class="profile-row"><span class="label">Length</span><span id="dp-length">—</span></div>
+            <div class="profile-row"><span class="label">Region</span><span id="dp-region">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Digest panel -->
+      <div class="dash-panel hidden" id="panel-digest">
+        <div class="dash-header">
+          <h1>Today's digest</h1>
+          <p>Regenerate anytime — each run uses fresh live sources.</p>
+        </div>
+        <div class="dash-card">
+          <div id="digest-output-full" class="digest-content empty">Use Generate to load your brief.</div>
+          <p class="source-badge" id="digest-source-note-full"></p>
+        </div>
+      </div>
+
+      <!-- Profile panel -->
+      <div class="dash-panel hidden" id="panel-profile">
+        <div class="dash-header">
+          <h1>Your digest profile</h1>
+          <p>Your intelligence profile. Reset anytime to start fresh.</p>
+        </div>
+        <div class="dash-card">
+          <div class="profile-row"><span class="label">Role</span><span id="dp-profession-2">—</span></div>
+          <div class="profile-row"><span class="label">Goal</span><span id="dp-goal-2">—</span></div>
+          <div class="profile-row"><span class="label">Topics</span><div class="profile-tags" id="dp-tags-2"></div></div>
+          <div class="profile-row"><span class="label">Language</span><span id="dp-language">—</span></div>
+          <div class="profile-row"><span class="label">Country</span><span id="dp-country">—</span></div>
+          <div class="profile-row"><span class="label">Scope</span><span id="dp-scope-2">—</span></div>
+          <div class="profile-row"><span class="label">Length</span><span id="dp-length-2">—</span></div>
+          <div class="profile-row"><span class="label">Sources</span><span id="dp-sources">—</span></div>
+          <div class="profile-row"><span class="label">Avoid</span><span id="dp-avoid-2">—</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+<script src="/js/app.js"></script>
+</body>
+</html>
