@@ -186,17 +186,7 @@ async function generateDigest(user, news) {
     profile.tone       && `Tone: ${profile.tone}`,
   ].filter(Boolean).join("\n");
 
-  const systemInstruction = `You are Signal — a ruthlessly precise personal intelligence system.
-
-MANDATORY RULES — violating any is a critical failure:
-1. EXACTLY 2 sentences per story. Not 1. Not 3. Count them. Stop at 2.
-2. Sentence 1: what happened — sharp, specific, no fluff.
-3. Sentence 2: what changes next, who wins, or what opportunity opens.
-4. NEVER use: "WHAT:", "WHY YOU:", "ACTION:", "WHY IT MATTERS:", "IMPLICATION:"
-5. NEVER use: "may have implications", "could impact", "important to understand", "as a professional in", "consider exploring", "monitor the situation", "significant development", "it is critical to"
-6. 📊 THIS WEEK = pure trend observations only. No advice. No actions. No recommendations.
-7. Never say "as a YouTuber" or "as a [profession]" — just deliver the insight.
-8. Write like a sharp analyst, not a corporate AI.`;
+  const systemInstruction = "You are Signal — a precise personal intelligence system.";
 
   const prompt = buildDigestPrompt({
     memoryText,
