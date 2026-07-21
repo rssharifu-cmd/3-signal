@@ -1,0 +1,36 @@
+name: Daily News Digest
+
+on:
+  schedule:
+    # Runs at 13:00 UTC (1:00 PM UTC) daily, matching previous vercel cron
+    - cron: '0 13 * * *'
+  workflow_dispatch: # Allows manually triggering the run from GitHub UI
+
+jobs:
+  send-digest:
+    name: Generate & Send Daily Digests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Execute send-digests script
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: node scripts/send-digests.js

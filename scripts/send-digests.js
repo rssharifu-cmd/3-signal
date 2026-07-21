@@ -1,16 +1,21 @@
 /**
- * DEPRECATED: Vercel Node.js Serverless — GET /api/cron
+ * Signal — Standalone Digest Sender Script
+ * Intended to be executed as a daily cron job via GitHub Actions.
  * 
- * NOTE: The daily cron job has been migrated off Vercel serverless functions
- * and onto GitHub Actions (defined at `.github/workflows/daily-digest.yml` running 
- * `/scripts/send-digests.js`). This avoids Vercel's execution time limits on sequential tasks.
- *
- * This endpoint is now unmapped from Vercel's routing rules and deprecated, 
- * but the code is preserved here for historical reference.
+ * Flow:
+ * 1. Loads environment variables (locally via dotenv, or directly in CI).
+ * 2. Connects to the real MongoDB database.
+ * 3. Fetches all users with valid email and profiles.
+ * 4. Processes users in parallel batches of 5.
+ * 5. Uses the atomic digests collection lock to prevent duplicate sends.
+ * 6. Generates highly personalized daily news digests via Gemini / Groq.
+ * 7. Dispatches the emails via Resend.
+ * 8. Logs detailed results and exits with non-zero code on failure.
  */
 
-const { getDb } = require("./db");
-const { formatMemoryForPrompt, ensureMemory } = require("./memory");
+require("dotenv").config();
+const { getDb } = require("../api/db");
+const { formatMemoryForPrompt, ensureMemory, buildDigestPrompt } = require("../api/memory");
 
 const GROK_URL    = "https://api.groq.com/openai/v1/chat/completions";
 const RESEND_URL  = "https://api.resend.com/emails";
@@ -26,32 +31,9 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function getUTCHourForLocalTime(digestTime, timezone) {
-  let [localHourStr] = (digestTime || "08:00").split(":");
-  let targetHour = parseInt(localHourStr, 10);
-  if (isNaN(targetHour)) targetHour = 8;
-  const now = new Date();
-  try {
-    const formatter    = new Intl.DateTimeFormat("en-US", { timeZone: timezone || "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-    const formatterUTC = new Intl.DateTimeFormat("en-US", { timeZone: "UTC",             year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-    const parts    = formatter.formatToParts(now);
-    const utcParts = formatterUTC.formatToParts(now);
-    const getVal   = (pList, type) => parseInt(pList.find(p => p.type === type).value, 10);
-    const localDate = Date.UTC(getVal(parts, "year"), getVal(parts, "month") - 1, getVal(parts, "day"), getVal(parts, "hour"), getVal(parts, "minute"), getVal(parts, "second"));
-    const utcDate   = Date.UTC(getVal(utcParts, "year"), getVal(utcParts, "month") - 1, getVal(utcParts, "day"), getVal(utcParts, "hour"), getVal(utcParts, "minute"), getVal(utcParts, "second"));
-    const diffHours = Math.round((localDate - utcDate) / (1000 * 60 * 60));
-    return (targetHour - diffHours + 24) % 24;
-  } catch (err) {
-    console.error("UTC hour conversion error:", err.message);
-    return targetHour;
-  }
-}
-
 // ── FETCH NEWS — direct live fetch ───────────────────────────────────────────
 async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
-  console.log(`[CRON] ${user.email} — running live fetch`);
+  console.log(`[NEWS] ${user.email} — running live fetch`);
 
   const tavilyKey  = (process.env.TAVILY_API_KEY  || "").trim();
   const youtubeKey = (process.env.YOUTUBE_API_KEY || "").trim();
@@ -66,7 +48,7 @@ async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
 
   const sentUrls = new Set();
   if (lastDigest && lastDigest.content) {
-    const urlRegex = /https?:\/\/[^\s>")\*,;]+/g;
+    const urlRegex = /https?:\/\/[^\s(">)\*,;]+/g;
     let m;
     while ((m = urlRegex.exec(lastDigest.content)) !== null) {
       sentUrls.add(m[0].trim().replace(/[\.,\);]+$/, "").toLowerCase());
@@ -216,47 +198,13 @@ MANDATORY RULES — violating any is a critical failure:
 7. Never say "as a YouTuber" or "as a [profession]" — just deliver the insight.
 8. Write like a sharp analyst, not a corporate AI.`;
 
-  const prompt = `Generate a personalized intelligence brief. Today is ${today}.
-
-USER PROFILE:
-${memoryText || profileText}
-
-ARTICLES:
-${articleText}
-
-OUTPUT FORMAT — follow exactly:
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR SIGNAL · ${today}
-
-🔥 TOP STORIES
-
-① [Headline]
-[EXACTLY 2 sentences. S1: what happened. S2: what changes next or who benefits.]
-→ [URL]
-
-② [Headline]
-[EXACTLY 2 sentences.]
-→ [URL]
-
-③ [Headline]
-[EXACTLY 2 sentences.]
-→ [URL]
-
-④ [Headline]
-[EXACTLY 2 sentences.]
-→ [URL]
-
-⑤ [Headline]
-[EXACTLY 2 sentences.]
-→ [URL]
-
-📊 THIS WEEK
-• [Sharp trend observation. 1-2 sentences. No advice. No actions.]
-• [Sharp trend observation. 1-2 sentences. No advice. No actions.]
-• [Sharp trend observation. 1-2 sentences. No advice. No actions.]
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
+  const prompt = buildDigestPrompt({
+    memoryText,
+    profileText,
+    newsContext: articleText,
+    plan: profile.plan || "free",
+    today
+  });
 
   if (apiGeminiKey) {
     const { GoogleGenAI } = require("@google/genai");
@@ -333,13 +281,6 @@ async function sendDigestEmail(user, digestContent) {
   return data.id;
 }
 
-// ── SAVE DIGEST ───────────────────────────────────────────────────────────────
-async function saveDigest(db, userId, email, content, localDateStr) {
-  try {
-    await db.collection("digests").insertOne({ userId, email, content, sentAt: new Date(), date: localDateStr || new Date().toISOString().split("T")[0] });
-  } catch (e) { console.warn("Digest save failed:", e.message); }
-}
-
 async function logDelivery(db, user, status, error = null, userLocalDateStr = "", userTimeStr = "") {
   try {
     await db.collection("delivery_logs").insertOne({ userId: user._id, email: user.email, status, error, attemptedAt: new Date(), userLocalTime: userTimeStr, userLocalDate: userLocalDateStr, timezone: user.profile?.timezone || "UTC", digestTime: user.profile?.digestTime || "08:00" });
@@ -351,6 +292,7 @@ async function processUser(db, user, now) {
   let userTimeStr = "", userLocalDateStr = "", userTz = user.profile?.timezone || "UTC";
   try {
     if (!user.email || !user.profile?.summary) {
+      console.log(`[SKIP] ${user.email || "No Email"} — missing email or profile summary`);
       return { status: "skipped", reason: "Missing email or profile summary" };
     }
 
@@ -372,7 +314,7 @@ async function processUser(db, user, now) {
       { upsert: true }
     );
     if (lockResult.upsertedCount === 0) {
-      console.log(`[CRON] Skipping ${user.email} — already sent for ${userLocalDateStr}`);
+      console.log(`[SKIP] ${user.email} — already sent for ${userLocalDateStr}`);
       return { status: "skipped", reason: "Already sent (locked)" };
     }
 
@@ -386,17 +328,18 @@ async function processUser(db, user, now) {
     const avoid  = profile.avoid      || "";
 
     const news = await fetchNews(db, user, topics, prof, avoid, lastDigest);
-    console.log(`[CRON] ${user.email} — ${news.articles.length} articles`);
+    console.log(`[NEWS] ${user.email} — ${news.articles.length} articles parsed`);
 
     const digestContent = await generateDigest(user, news);
     if (!digestContent) {
       await db.collection("digests").deleteOne({ email: user.email, date: userLocalDateStr, locked: true });
       await logDelivery(db, user, "skipped", "Empty digest", userLocalDateStr, userTimeStr);
+      console.log(`[SKIP] ${user.email} — digest content empty`);
       return { status: "skipped", reason: "Empty digest" };
     }
 
     const emailId = await sendDigestEmail(user, digestContent);
-    console.log(`[CRON] ${user.email} — sent: ${emailId}`);
+    console.log(`[SENT] ${user.email} — Resend ID: ${emailId}`);
 
     await db.collection("digests").updateOne(
       { email: user.email, date: userLocalDateStr },
@@ -407,36 +350,55 @@ async function processUser(db, user, now) {
     return { status: "sent" };
 
   } catch (userErr) {
-    console.error(`[CRON] Failed for ${user.email}:`, userErr.message);
+    console.error(`[FAIL] ${user.email || "Unknown user"}:`, userErr.message);
     try { await db.collection("digests").deleteOne({ email: user.email, date: userLocalDateStr, locked: true }); } catch (_) {}
     try { await logDelivery(db, user, "failed", userErr.message, userLocalDateStr, userTimeStr); } catch (_) {}
-    return { status: "failed", email: user.email, error: userErr.message };
+    return { status: "failed", error: userErr.message };
   }
 }
 
-// ── MAIN HANDLER ──────────────────────────────────────────────────────────────
-async function handler(req, res) {
-  const cronSecret = (process.env.CRON_SECRET || "").trim();
-  if (cronSecret) {
-    const authHeader = req.headers?.authorization || "";
-    if (authHeader !== `Bearer ${cronSecret}`) return res.status(401).json({ error: "Unauthorized" });
-  }
-  if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-
+// ── SCRIPT MAIN ENTRYPOINT ───────────────────────────────────────────────────
+async function run() {
   const startTime = Date.now();
   const results   = { sent: 0, failed: 0, skipped: 0, errors: [] };
   const now       = new Date();
 
+  console.log(`\n======================================================`);
+  console.log(`[CRON] Standalone Digest Sender Started at ${now.toISOString()}`);
+  console.log(`======================================================\n`);
+
+  let db;
   try {
-    const db    = await getDb();
-    const users = await db.collection("users").find({ email: { $exists: true, $ne: "" }, profile: { $exists: true, $ne: null } }).toArray();
-    console.log(`[CRON] Starting digest run for ${users.length} users`);
+    db = await getDb();
+  } catch (dbErr) {
+    console.error("FATAL: Failed to connect to MongoDB. Check MONGODB_URI.", dbErr.message);
+    process.exit(1);
+  }
+
+  try {
+    const users = await db.collection("users").find({
+      email: { $exists: true, $ne: "" },
+      profile: { $exists: true, $ne: null }
+    }).toArray();
+
+    console.log(`[CRON] Fetched ${users.length} candidate users for digest`);
 
     const batchSize = 5;
+    let hasFailures = false;
+
     for (let i = 0; i < users.length; i += batchSize) {
       const batch = users.slice(i, i + batchSize);
-      console.log(`[CRON] Processing batch of ${batch.length} users (${i + 1} to ${Math.min(i + batchSize, users.length)})`);
-      const batchResults = await Promise.all(batch.map(user => processUser(db, user, now)));
+      console.log(`\n[BATCH] Processing batch ${Math.floor(i / batchSize) + 1} (${i + 1} to ${Math.min(i + batchSize, users.length)})`);
+      
+      const batchResults = await Promise.all(batch.map(async (user) => {
+        try {
+          const res = await processUser(db, user, now);
+          return { email: user.email, ...res };
+        } catch (err) {
+          console.error(`[CRON] Unhandled error for ${user.email || "Unknown"}:`, err.message);
+          return { email: user.email, status: "failed", error: err.message };
+        }
+      }));
 
       for (const res of batchResults) {
         if (res.status === "sent") {
@@ -445,19 +407,33 @@ async function handler(req, res) {
           results.skipped++;
         } else if (res.status === "failed") {
           results.failed++;
+          hasFailures = true;
           results.errors.push({ email: res.email, error: res.error });
         }
       }
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(`[CRON] Done in ${duration}s —`, results);
-    return res.status(200).json({ ok: true, duration: `${duration}s`, users: users.length, ...results });
+    console.log(`\n======================================================`);
+    console.log(`[CRON] Done in ${duration}s`);
+    console.log(`[STATS] Sent: ${results.sent} | Skipped: ${results.skipped} | Failed: ${results.failed}`);
+    if (results.errors.length > 0) {
+      console.error(`[ERRORS] Summary of failures:`);
+      results.errors.forEach(e => console.error(`  - ${e.email}: ${e.error}`));
+    }
+    console.log(`======================================================\n`);
+
+    // Exit with code 1 if there were any failure statuses so that GitHub Actions marks the run as failed.
+    if (hasFailures) {
+      process.exit(1);
+    } else {
+      process.exit(0);
+    }
 
   } catch (err) {
-    console.error("[CRON] Fatal:", err.message);
-    return res.status(500).json({ error: err.message || "Cron failed" });
+    console.error("FATAL: Unhandled exception in run loop:", err.message);
+    process.exit(1);
   }
 }
 
-module.exports = handler;
+run();
