@@ -542,6 +542,19 @@ async function confirmConversationalProfile(summaryText) {
           },
         }),
       });
+
+      // Send welcome email
+      fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "welcome",
+          email: savedEmail,
+          name: form.name,
+          profileSummary: summaryText,
+          unlockDate: lockUntil.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        }),
+      }).catch((e) => console.warn("Welcome email send error:", e));
     } catch (err) {
       console.warn("Saving profile to DB failed:", err);
     }

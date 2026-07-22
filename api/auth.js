@@ -125,7 +125,7 @@ async function handler(req, res) {
         name,
         passwordHash,
         plan: "starter",
-        active: false,        // activated after Stripe payment (Week 4)
+        active: true,         // default active status for 3-day trial
         profile: null,
         createdAt: now,
         updatedAt: now,

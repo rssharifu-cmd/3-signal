@@ -178,8 +178,9 @@
         </div>
         <div class="dash-grid">
           <div class="dash-card span-2">
-            <div class="dash-card-head">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;">
               <h3>Latest digest</h3>
+              <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this digest ✉️</button>
             </div>
             <div class="digest-panel">
               <div id="digest-output" class="digest-content empty">Loading…</div>
