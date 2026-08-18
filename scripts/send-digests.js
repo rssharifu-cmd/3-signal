@@ -200,7 +200,7 @@ async function generateDigest(user, news) {
     const { GoogleGenAI } = require("@google/genai");
     const ai = new GoogleGenAI({ apiKey: apiGeminiKey });
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.6-flash",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: { systemInstruction, temperature: 0.25 },
     });
