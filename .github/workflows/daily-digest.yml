@@ -18,19 +18,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm install
-
-      - name: Debug RESEND_API_KEY length
-        env:
-          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-        run: |
-          echo "RESEND_API_KEY length: ${#RESEND_API_KEY}"
-          echo "First 3 chars: ${RESEND_API_KEY:0:3}"
-          echo "Last 3 chars: ${RESEND_API_KEY: -3}"
 
       - name: Execute send-digests script
         env:
