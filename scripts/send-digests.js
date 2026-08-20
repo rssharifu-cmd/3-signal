@@ -199,12 +199,34 @@ async function generateDigest(user, news) {
   if (apiGeminiKey) {
     const { GoogleGenAI } = require("@google/genai");
     const ai = new GoogleGenAI({ apiKey: apiGeminiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { systemInstruction, temperature: 0.25 },
-    });
-    return response.text || "";
+    const maxAttempts = 3;
+    const delays = [5000, 10000];
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3.6-flash",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { systemInstruction, temperature: 0.25 },
+        });
+        return response.text || "";
+      } catch (err) {
+        const errMsg = String(err?.message || err || "");
+        const status = err?.status || err?.statusCode || err?.code;
+        const isUnavailable =
+          status === 503 ||
+          status === "UNAVAILABLE" ||
+          /503|unavailable|high demand|overloaded/i.test(errMsg);
+
+        if (attempt < maxAttempts && isUnavailable) {
+          const delay = delays[attempt - 1];
+          console.warn(`[GEMINI] Attempt ${attempt} failed (${errMsg}). Retrying in ${delay / 1000}s...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        } else {
+          throw err;
+        }
+      }
+    }
   } else {
     const res = await withTimeout(fetch(GROK_URL, {
       method: "POST",
