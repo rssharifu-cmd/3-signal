@@ -465,8 +465,10 @@ async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
   console.log(`[NEWS] ${user.email} (Tier: ${plan}) — starting 4-stage personalization pipeline`);
 
   let startTimeWindow;
+  const minWindowMs = 24 * 60 * 60 * 1000; // never search a window narrower than 24h
   if (lastDigest && lastDigest.sentAt) {
-    startTimeWindow = new Date(lastDigest.sentAt);
+    const sinceLastDigest = Date.now() - new Date(lastDigest.sentAt).getTime();
+    startTimeWindow = new Date(Date.now() - Math.max(sinceLastDigest, minWindowMs));
   } else {
     startTimeWindow = new Date(Date.now() - 48 * 60 * 60 * 1000);
   }
@@ -688,6 +690,13 @@ async function processUser(db, user, now) {
 
     const news = await fetchNews(db, user, topics, prof, avoid, lastDigest);
     console.log(`[NEWS] ${user.email} — ${news.articles.length} articles parsed`);
+
+    if (!news.articles || news.articles.length === 0) {
+      await db.collection("digests").deleteOne({ email: user.email, date: userLocalDateStr, locked: true });
+      await logDelivery(db, user, "skipped", "No candidate articles found", userLocalDateStr, userTimeStr);
+      console.log(`[SKIP] ${user.email} — no candidate articles found`);
+      return { status: "skipped", reason: "No candidate articles found" };
+    }
 
     const digestContent = await generateDigest(user, news);
     if (!digestContent) {
