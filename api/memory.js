@@ -220,7 +220,7 @@ function ensureMemory(user, profilePayload) {
 
 /** Shared digest prompt — dashboard + cron use identical intelligence rules. */
 function buildDigestPrompt({ memoryText, profileText, newsContext, plan, today }) {
-  const isPro = plan === "pro";
+  const isPro = plan === "pro" || plan === "premium";
 
   const newsRules = newsContext
     ? `LIVE NEWS (mandatory — every item must cite a source below):

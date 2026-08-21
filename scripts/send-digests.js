@@ -31,12 +31,438 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-// ── FETCH NEWS — direct live fetch ───────────────────────────────────────────
-async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
-  console.log(`[NEWS] ${user.email} — running live fetch`);
+// ── TIER CONFIGURATION ────────────────────────────────────────────────────────
+const TIER_CONFIG = {
+  free: {
+    queryModel: "gemini-3.5-flash-lite",
+    queryCountMin: 3,
+    queryCountMax: 4,
+    scoringMode: "code",
+    finalArticleCount: 6,
+  },
+  pro: {
+    queryModel: "gemini-3.6-flash",
+    queryCountMin: 5,
+    queryCountMax: 7,
+    scoringMode: "code",
+    finalArticleCount: 8,
+  },
+  premium: {
+    queryModel: "gemini-3.6-flash",
+    queryCountMin: 7,
+    queryCountMax: 10,
+    scoringMode: "ai",
+    finalArticleCount: 10,
+  },
+};
 
+// ── STAGE 1 — QUERY GENERATION ───────────────────────────────────────────────
+function buildFallbackQueries(topics, profession, goals, plan) {
+  const tier = TIER_CONFIG[plan] || TIER_CONFIG.free;
+  const topicList = (topics || "technology, AI")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const primaryTopic = topicList[0] || "technology";
+  const secondaryTopic = topicList[1] || primaryTopic;
+  const profRole = (profession || "").split(/[,/]/)[0].trim();
+  const currentYear = new Date().getFullYear();
+
+  const queries = [
+    { query: `Latest ${primaryTopic} breakthroughs developments`, source: "web", intent: "Primary topic high-conviction news" },
+    { query: profRole ? `${profRole} ${primaryTopic} strategies tools` : `${primaryTopic} industry trends`, source: "web", intent: "Role-specific industry developments" },
+    { query: `${primaryTopic} best tools recommendations`, source: "reddit", intent: "Community discussions & peer insights" },
+    { query: `${primaryTopic} guide breakdown ${currentYear}`, source: "youtube", intent: "Video analysis & breakdowns" },
+  ];
+
+  if (tier.queryCountMax > 4) {
+    if (goals) {
+      queries.push({ query: `${goals} ${primaryTopic} actionable guide`, source: "web", intent: "Goal-adjacent opportunities" });
+    }
+    if (secondaryTopic !== primaryTopic) {
+      queries.push({ query: `Latest ${secondaryTopic} innovations`, source: "web", intent: "Secondary topic updates" });
+      queries.push({ query: `${secondaryTopic} founder experience advice`, source: "reddit", intent: "Secondary community insights" });
+    }
+  }
+
+  return queries.slice(0, tier.queryCountMax);
+}
+
+async function generateSearchQueries(user, profile, memory, plan) {
+  const tier = TIER_CONFIG[plan] || TIER_CONFIG.free;
+  const apiGeminiKey = (process.env.GEMINI_API_KEY || "").trim();
+  const apiGrokKey   = (process.env.GROK_API_KEY   || "").trim();
+  const topics = profile.topics || "technology, AI";
+  const profession = profile.profession || memory?.role || "";
+  const goals = profile.goals || memory?.goals || "";
+  const avoid = profile.avoid || (memory?.dislikedTopics || []).join(", ");
+  const memoryText = formatMemoryForPrompt(memory);
+
+  const fallbackQueries = buildFallbackQueries(topics, profession, goals, plan);
+
+  if (!apiGeminiKey && !apiGrokKey) {
+    return fallbackQueries;
+  }
+
+  const queryPrompt = `You are a search intelligence engine generating highly targeted research queries for a personalized daily news digest.
+
+USER PROFILE & MEMORY:
+${memoryText || `Role: ${profession}\nGoals: ${goals}\nTopics: ${topics}`}
+${avoid ? `AVOID TOPICS / OUTLETS: ${avoid}` : ""}
+
+DIRECTIVES:
+1. Generate between ${tier.queryCountMin} and ${tier.queryCountMax} queries.
+2. Cover distinct strategic angles:
+   - Deep-dive into primary learned topic interests
+   - Goal-adjacent opportunities and execution moves
+   - Role/profession specific developments and competitive shifts
+   - Follow-up on recently engaged topics
+3. NEVER generate generic queries (e.g. "AI news" or "tech updates"). Formulate specific, high-intent phrases (e.g., "open source agent workflows for solo founders", "b2b pricing strategies enterprise 2026").
+4. NEVER touch anything in the avoid/disliked list.
+5. Assign a source tag to each query: "web" (for Tavily news search), "reddit" (for authentic community sentiment), or "youtube" (for high-signal video tutorials/breakdowns). Ensure at least 1 "youtube" and 1 "reddit" query; the remainder should be "web".
+6. Output ONLY a valid JSON array of objects with the exact schema:
+[
+  { "query": "string", "source": "web" | "reddit" | "youtube", "intent": "string" }
+]`;
+
+  try {
+    let rawText = "";
+    if (apiGeminiKey) {
+      const { GoogleGenAI } = require("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: apiGeminiKey });
+      const res = await ai.models.generateContent({
+        model: tier.queryModel,
+        contents: [{ role: "user", parts: [{ text: queryPrompt }] }],
+        config: {
+          temperature: 0.3,
+          responseMimeType: "application/json",
+        },
+      });
+      rawText = res.text || "";
+    } else if (apiGrokKey) {
+      const res = await withTimeout(
+        fetch(GROK_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiGrokKey}`,
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [{ role: "user", content: queryPrompt }],
+            temperature: 0.3,
+          }),
+        }),
+        TIMEOUT_MS
+      );
+      if (res.ok) {
+        const data = await res.json();
+        rawText = data.choices?.[0]?.message?.content || "";
+      }
+    }
+
+    if (rawText) {
+      const cleaned = rawText.replace(/```json\n?|\n?```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const valid = parsed
+          .filter((q) => q && typeof q.query === "string" && q.query.trim().length > 3)
+          .map((q) => ({
+            query: q.query.trim(),
+            source: ["web", "reddit", "youtube"].includes(q.source) ? q.source : "web",
+            intent: q.intent || "",
+          }));
+        if (valid.length >= tier.queryCountMin) {
+          return valid.slice(0, tier.queryCountMax);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`[QUERY-GEN] AI query generation error for ${user.email} (${err.message}). Using fallback queries.`);
+  }
+
+  return fallbackQueries;
+}
+
+// ── STAGE 2 — CANDIDATE POOL FETCH ───────────────────────────────────────────
+async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
   const tavilyKey  = (process.env.TAVILY_API_KEY  || "").trim();
   const youtubeKey = (process.env.YOUTUBE_API_KEY || "").trim();
+  const avoidList  = (avoid || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  const fetchTasks = queries.map(async (qObj) => {
+    const { query, source } = qObj;
+    if (source === "web") {
+      if (!tavilyKey) return [];
+      try {
+        const res = await withTimeout(
+          fetch(TAVILY_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              api_key: tavilyKey,
+              query: query,
+              search_depth: "advanced",
+              include_answer: false,
+              include_raw_content: false,
+              max_results: 6,
+              exclude_domains: avoidList,
+              publishedAfter: publishedAfterStr,
+            }),
+          }),
+          TIMEOUT_MS
+        );
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.results || []).map((r) => ({
+          source: "tavily",
+          title: r.title || "",
+          url: r.url || "",
+          snippet: (r.content || r.snippet || "").slice(0, 400),
+          queryIntent: qObj.intent,
+        }));
+      } catch (err) {
+        return [];
+      }
+    } else if (source === "reddit") {
+      try {
+        const url = `https://www.reddit.com/search.json?q=${encodeURIComponent(query)}&sort=relevance&t=week&limit=5`;
+        const res = await withTimeout(
+          fetch(url, { headers: { "User-Agent": "Signal-NewsDigest/1.0 (by /u/sharflow)" } }),
+          TIMEOUT_MS
+        );
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data?.data?.children || [])
+          .filter((p) => !p.data?.stickied && !p.data?.over_18 && p.data?.title)
+          .map((p) => ({
+            source: "reddit",
+            title: p.data.title,
+            url: `https://reddit.com${p.data.permalink || ""}`,
+            snippet: `${p.data.ups || 0} upvotes · r/${p.data.subreddit || ""} · ${(p.data.selftext || "").slice(0, 300)}`,
+            queryIntent: qObj.intent,
+          }));
+      } catch (err) {
+        return [];
+      }
+    } else if (source === "youtube") {
+      if (!youtubeKey) return [];
+      try {
+        const params = new URLSearchParams({
+          part: "snippet",
+          q: query,
+          type: "video",
+          order: "relevance",
+          maxResults: "5",
+          videoDuration: "medium",
+          relevanceLanguage: "en",
+          publishedAfter: publishedAfterStr,
+          key: youtubeKey,
+        });
+        const res = await withTimeout(fetch(`${YOUTUBE_URL}?${params}`), TIMEOUT_MS);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return (data.items || [])
+          .filter((i) => i.snippet?.title?.length > 10)
+          .map((item) => ({
+            source: "youtube",
+            title: item.snippet.title,
+            url: `https://youtube.com/watch?v=${item.id.videoId}`,
+            snippet: `${item.snippet.channelTitle} · ${item.snippet.description || ""}`.slice(0, 400),
+            queryIntent: qObj.intent,
+          }));
+      } catch (err) {
+        return [];
+      }
+    }
+    return [];
+  });
+
+  const resultsNested = await Promise.all(fetchTasks);
+  const flattened = resultsNested.flat();
+
+  // Deduplication by normalized URL and avoid filtering
+  const seenUrls = new Set();
+  const candidates = [];
+
+  for (const art of flattened) {
+    if (!art.url || !art.title) continue;
+    const cleanUrl = art.url.trim().toLowerCase().split("?")[0].replace(/\/+$/, "");
+    if (seenUrls.has(cleanUrl)) continue;
+    seenUrls.add(cleanUrl);
+
+    // Filter against sentUrls from previous digests
+    let alreadySent = false;
+    for (const sent of sentUrls) {
+      if (cleanUrl.includes(sent) || sent.includes(cleanUrl)) {
+        alreadySent = true;
+        break;
+      }
+    }
+    if (alreadySent) continue;
+
+    // Filter against avoid list
+    const combinedText = `${art.title} ${art.snippet} ${art.url}`.toLowerCase();
+    const hitAvoid = avoidList.some((avoidTerm) => avoidTerm.length > 2 && combinedText.includes(avoidTerm));
+    if (hitAvoid) continue;
+
+    candidates.push(art);
+  }
+
+  return candidates;
+}
+
+// ── STAGE 3 — RELEVANCE SCORING ──────────────────────────────────────────────
+function scoreCandidatesCodeBased(candidates, profile, memory) {
+  const interests = memory?.interests || {};
+  const disliked = memory?.dislikedTopics || [];
+  const favoriteSources = memory?.favoriteSources || [];
+  const clicked = memory?.clickedTopics || [];
+
+  const profKeywords = (profile?.profession || memory?.role || "")
+    .toLowerCase()
+    .split(/[\s,/]+/)
+    .map((k) => k.trim())
+    .filter((k) => k.length > 2);
+
+  const goalKeywords = (profile?.goals || memory?.goals || "")
+    .toLowerCase()
+    .split(/[\s,/]+/)
+    .map((k) => k.trim())
+    .filter((k) => k.length > 2);
+
+  return candidates.map((art) => {
+    let score = 20;
+    const tl = (art.title || "").toLowerCase();
+    const sl = (art.snippet || "").toLowerCase();
+    const combined = `${tl} ${sl}`;
+
+    // 1. Learned topic interest scores from user.memory.interests
+    for (const [topic, topicScore] of Object.entries(interests)) {
+      const topicLower = topic.toLowerCase();
+      if (tl.includes(topicLower)) {
+        score += (topicScore / 100) * 25;
+      } else if (sl.includes(topicLower)) {
+        score += (topicScore / 100) * 10;
+      }
+    }
+
+    // 2. Profession & role alignment
+    profKeywords.forEach((kw) => {
+      if (tl.includes(kw)) score += 15;
+      else if (sl.includes(kw)) score += 6;
+    });
+
+    // 3. Goal alignment
+    goalKeywords.forEach((kw) => {
+      if (tl.includes(kw)) score += 15;
+      else if (sl.includes(kw)) score += 6;
+    });
+
+    // 4. Recently clicked / engaged topics
+    clicked.forEach((c) => {
+      const cTopic = (c.topic || "").toLowerCase();
+      if (cTopic && combined.includes(cTopic)) {
+        score += 15;
+      }
+    });
+
+    // 5. Favorite sources bonus
+    favoriteSources.forEach((src) => {
+      const srcLower = src.toLowerCase();
+      if (art.url.toLowerCase().includes(srcLower) || combined.includes(srcLower)) {
+        score += 20;
+      }
+    });
+
+    // 6. Source type baseline weighting
+    if (art.source === "tavily") score += 5;
+    if (art.source === "youtube") score += 4;
+    if (art.source === "reddit") score += 3;
+
+    // 7. Disliked topics penalty
+    disliked.forEach((dt) => {
+      const dtLower = dt.toLowerCase();
+      if (dtLower && combined.includes(dtLower)) {
+        score -= 80;
+      }
+    });
+
+    return { ...art, score: Math.max(0, Math.round(score)) };
+  });
+}
+
+async function scoreCandidatesAi(candidates, user, profile, memory) {
+  const apiGeminiKey = (process.env.GEMINI_API_KEY || "").trim();
+  if (!apiGeminiKey || candidates.length <= 1) {
+    return scoreCandidatesCodeBased(candidates, profile, memory);
+  }
+
+  const memoryText = formatMemoryForPrompt(memory);
+  const candidatesSummary = candidates
+    .map((c, i) => `[${i + 1}] Title: ${c.title}\nSource: ${c.source}\nSnippet: ${c.snippet}`)
+    .join("\n\n");
+
+  const prompt = `You are an elite intelligence analyst scoring news and discussion candidates for a personalized daily digest.
+
+USER PROFILE & MEMORY:
+${memoryText || `Role: ${profile.profession}\nGoals: ${profile.goals}\nTopics: ${profile.topics}`}
+
+CANDIDATE ARTICLES:
+${candidatesSummary}
+
+TASK:
+Score each candidate from 0 to 100 based on its strategic value, specificity, and relevance to this user's role, goals, and learned interests. Heavily penalize clickbait or any disliked topics.
+
+Return ONLY a JSON array of objects with "index" (1-based integer matching candidate list) and "score" (integer 0-100):
+[
+  { "index": 1, "score": 92 },
+  { "index": 2, "score": 45 }
+]`;
+
+  try {
+    const { GoogleGenAI } = require("@google/genai");
+    const ai = new GoogleGenAI({ apiKey: apiGeminiKey });
+    const res = await ai.models.generateContent({
+      model: "gemini-3.6-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        temperature: 0.1,
+        responseMimeType: "application/json",
+      },
+    });
+    const rawText = res.text || "";
+    const parsed = JSON.parse(rawText.replace(/```json\n?|\n?```/g, "").trim());
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const scoreMap = new Map();
+      parsed.forEach((p) => {
+        if (p && typeof p.index === "number") {
+          scoreMap.set(p.index, Number(p.score) || 0);
+        }
+      });
+      return candidates.map((c, i) => ({
+        ...c,
+        score: scoreMap.has(i + 1) ? scoreMap.get(i + 1) : 50,
+      }));
+    }
+  } catch (err) {
+    console.warn(`[AI-SCORING] AI scoring failed for ${user.email} (${err.message}). Falling back to code-based scoring.`);
+  }
+
+  return scoreCandidatesCodeBased(candidates, profile, memory);
+}
+
+// ── FETCH NEWS — 4-Stage Personalization Pipeline ───────────────────────────
+async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
+  const profile = user.profile || {};
+  const plan    = profile.plan || "free";
+  const tier    = TIER_CONFIG[plan] || TIER_CONFIG.free;
+  const memory  = ensureMemory(user, profile);
+
+  console.log(`[NEWS] ${user.email} (Tier: ${plan}) — starting 4-stage personalization pipeline`);
 
   let startTimeWindow;
   if (lastDigest && lastDigest.sentAt) {
@@ -55,113 +481,34 @@ async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
     }
   }
 
-  async function tavily() {
-    if (!tavilyKey) return [];
-    try {
-      const res = await withTimeout(fetch(TAVILY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: tavilyKey,
-          query: `Latest news: ${topics || "technology AI business"}`,
-          search_depth: "advanced",
-          include_answer: false,
-          include_raw_content: false,
-          max_results: 10,
-          exclude_domains: avoid ? avoid.split(",").map(s => s.trim()).filter(Boolean) : [],
-          publishedAfter: publishedAfterStr,
-        }),
-      }), TIMEOUT_MS);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.results || []).map(r => ({ source: "tavily", title: r.title || "", url: r.url || "", snippet: (r.content || r.snippet || "").slice(0, 400) }));
-    } catch (err) { return []; }
+  // Stage 1: Query Generation
+  const queries = await generateSearchQueries(user, profile, memory, plan);
+  console.log(`[NEWS] ${user.email} — generated ${queries.length} targeted queries [${queries.map((q) => `${q.source}: "${q.query}"`).join("; ")}]`);
+
+  // Stage 2: Candidate Pool Fetch (aiming for 20-30 candidates)
+  const candidates = await fetchCandidates(queries, avoid || (memory.dislikedTopics || []).join(", "), publishedAfterStr, sentUrls);
+  console.log(`[NEWS] ${user.email} — fetched ${candidates.length} unique candidates`);
+
+  if (candidates.length === 0) {
+    return { articles: [] };
   }
 
-  async function reddit() {
-    const subredditMap = { "money": "Entrepreneur", "online": "Entrepreneur", "youtube": "NewTubers", "ai": "artificial", "startup": "startups", "finance": "finance", "tech": "technology", "crypto": "CryptoCurrency", "marketing": "marketing", "business": "business" };
-    const topicsLower = (topics || "").toLowerCase();
-    let subreddit = "Entrepreneur";
-    for (const [key, sub] of Object.entries(subredditMap)) { if (topicsLower.includes(key)) { subreddit = sub; break; } }
-    try {
-      const res = await withTimeout(fetch(`https://www.reddit.com/r/${subreddit}/hot.json?limit=10`, { headers: { "User-Agent": "Signal-NewsDigest/1.0" } }), TIMEOUT_MS);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data?.data?.children || []).filter(p => !p.data?.stickied && !p.data?.over_18).slice(0, 5).map(p => ({ source: "reddit", title: p.data?.title || "", url: `https://reddit.com${p.data?.permalink || ""}`, snippet: `${p.data?.ups || 0} upvotes · r/${p.data?.subreddit}` }));
-    } catch (err) { return []; }
+  // Stage 3: Relevance Scoring
+  let ranked = [];
+  if (tier.scoringMode === "ai") {
+    ranked = await scoreCandidatesAi(candidates, user, profile, memory);
+  } else {
+    ranked = scoreCandidatesCodeBased(candidates, profile, memory);
   }
 
-  async function rss() {
-    const topicsLower = (topics || "").toLowerCase();
-    const feedMap = [
-      { keys: ["money", "online", "business", "entrepreneur"], url: "https://feeds.feedburner.com/entrepreneur/latest" },
-      { keys: ["youtube", "creator"], url: "https://techcrunch.com/feed/" },
-      { keys: ["ai", "ml"], url: "https://techcrunch.com/category/artificial-intelligence/feed/" },
-      { keys: ["startup"], url: "https://techcrunch.com/category/startups/feed/" },
-      { keys: ["finance", "market"], url: "https://feeds.bbci.co.uk/news/business/rss.xml" },
-      { keys: ["crypto"], url: "https://cointelegraph.com/rss" },
-      { keys: ["tech", "engineering"], url: "https://feeds.feedburner.com/TechCrunch" },
-    ];
-    let feedUrl = "https://techcrunch.com/feed/";
-    for (const { keys, url } of feedMap) { if (keys.some(k => topicsLower.includes(k))) { feedUrl = url; break; } }
-    try {
-      const res = await withTimeout(fetch(feedUrl, { headers: { "User-Agent": "Signal-NewsDigest/1.0" } }), TIMEOUT_MS);
-      if (!res.ok) return [];
-      const xml = await res.text();
-      const items = [];
-      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-      let match;
-      while ((match = itemRegex.exec(xml)) !== null && items.length < 8) {
-        const block = match[1];
-        const title = (/<title><!\[CDATA\[(.*?)\]\]><\/title>/.exec(block) || /<title>(.*?)<\/title>/.exec(block) || [])[1] || "";
-        const link  = (/<link>(.*?)<\/link>/.exec(block)  || [])[1] || "";
-        const desc  = (/<description><!\[CDATA\[(.*?)\]\]><\/description>/.exec(block) || /<description>(.*?)<\/description>/.exec(block) || [])[1] || "";
-        if (title && link) items.push({ source: "rss", title: title.replace(/&amp;/g, "&").trim(), url: link.trim(), snippet: desc.replace(/<[^>]+>/g, "").slice(0, 300).trim() });
-      }
-      return items;
-    } catch (err) { return []; }
-  }
+  ranked.sort((a, b) => (b.score || 0) - (a.score || 0));
+  const topArticles = ranked.slice(0, tier.finalArticleCount);
 
-  async function youtube() {
-    if (!youtubeKey) return [];
-    const query = `${(topics || "technology").split(",")[0].trim()} ${profession ? profession.split(" ")[0] : ""} ${new Date().getFullYear()}`.trim();
-    try {
-      const params = new URLSearchParams({ part: "snippet", q: query, type: "video", order: "relevance", maxResults: "5", videoDuration: "medium", relevanceLanguage: "en", publishedAfter: publishedAfterStr, key: youtubeKey });
-      const res = await withTimeout(fetch(`${YOUTUBE_URL}?${params}`), TIMEOUT_MS);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return (data.items || []).filter(i => i.snippet?.title?.length > 10).map(item => ({ source: "youtube", title: item.snippet.title, url: `https://youtube.com/watch?v=${item.id.videoId}`, snippet: `${item.snippet.channelTitle} · ${item.snippet.description || ""}` }));
-    } catch (err) { return []; }
-  }
-
-  const [tavilyArticles, rssItems, redditPosts, youtubeVideos] = await Promise.all([tavily(), rss(), reddit(), youtube()]);
-  let pool = [...(tavilyArticles || []), ...(rssItems || []), ...(redditPosts || []), ...(youtubeVideos || [])];
-
-  pool = pool.filter(art => {
-    if (!art.url) return true;
-    const urlLower = art.url.trim().toLowerCase();
-    for (const sentUrl of sentUrls) { if (urlLower.includes(sentUrl) || sentUrl.includes(urlLower)) return false; }
-    return true;
-  });
-
-  const topicKeywords = (topics || "").toLowerCase().split(/[\s,]+/).map(k => k.trim()).filter(k => k.length > 2);
-  const profKeywords  = (profession || "").toLowerCase().split(/[\s,]+/).map(k => k.trim()).filter(k => k.length > 2);
-
-  const ranked = pool.map(art => {
-    let score = 0;
-    const tl = (art.title || "").toLowerCase(), sl = (art.snippet || "").toLowerCase();
-    topicKeywords.forEach(kw => { if (tl.includes(kw)) score += 15; if (sl.includes(kw)) score += 5; });
-    profKeywords.forEach(kw  => { if (tl.includes(kw)) score += 10; if (sl.includes(kw)) score += 3; });
-    if (art.source === "tavily")  score += 3;
-    if (art.source === "youtube") score += 2;
-    if (art.source === "reddit")  score += 1;
-    return { ...art, score };
-  });
-  ranked.sort((a, b) => b.score - a.score);
-  return { articles: ranked.slice(0, 6) };
+  console.log(`[NEWS] ${user.email} — selected top ${topArticles.length} articles (top score: ${topArticles[0]?.score || 0})`);
+  return { articles: topArticles };
 }
 
-// ── DIGEST GENERATION ─────────────────────────────────────────────────────────
+// ── STAGE 4 — DIGEST GENERATION ─────────────────────────────────────────────
 async function generateDigest(user, news) {
   const apiGrokKey   = (process.env.GROK_API_KEY   || "").trim();
   const apiGeminiKey = (process.env.GEMINI_API_KEY || "").trim();
@@ -171,7 +518,7 @@ async function generateDigest(user, news) {
   const memory  = ensureMemory(user, profile);
   const today   = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 
-  const articleText = news.articles.length
+  const articleText = (news.articles && news.articles.length)
     ? news.articles.map((a, i) => `[${i + 1}] ${a.title}\nSource: ${a.source} | ${a.url}\n${a.snippet}`).join("\n\n")
     : "No articles available.";
 
