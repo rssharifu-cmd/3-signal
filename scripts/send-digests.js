@@ -184,6 +184,13 @@ DIRECTIVES:
   return fallbackQueries;
 }
 
+// Helper to validate syntactically plausible domain names (no spaces, contains dot, valid TLD)
+function isValidDomain(str) {
+  if (!str || typeof str !== "string") return false;
+  const s = str.trim().toLowerCase();
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(s);
+}
+
 // ── STAGE 2 — CANDIDATE POOL FETCH ───────────────────────────────────────────
 async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
   const tavilyKey  = (process.env.TAVILY_API_KEY  || "").trim();
@@ -192,6 +199,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+  const excludeDomains = avoidList.filter(isValidDomain);
 
   const fetchTasks = queries.map(async (qObj) => {
     const { query, source } = qObj;
@@ -209,7 +217,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
               include_answer: false,
               include_raw_content: false,
               max_results: 6,
-              exclude_domains: avoidList,
+              ...(excludeDomains.length > 0 ? { exclude_domains: excludeDomains } : {}),
               publishedAfter: publishedAfterStr,
             }),
           }),
