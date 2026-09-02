@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Signal — personalized AI news digest delivered daily." />
-  <title>Signal — Your AI reads the internet for you</title>
+  <meta name="description" content="Sharflow — personalized AI news digest delivered daily." />
+  <title>Sharflow — Your AI reads the internet for you</title>
   <script>
     // Safeguard to prevent "TypeError: Cannot set property fetch of #<Window> which has only a getter"
     // which can occur in sandboxed frame wrappers or extensions attempting to proxy/override fetch.
@@ -23,7 +23,7 @@
           enumerable: true
         });
       } catch (e) {
-        console.warn("Signal Safeguard: Could not redefine window.fetch properties:", e.message);
+        console.warn("Sharflow Safeguard: Could not redefine window.fetch properties:", e.message);
       }
     })();
   </script>
@@ -35,7 +35,7 @@
 <!-- Landing -->
 <div id="landing-view">
   <nav class="nav">
-    <div class="nav-logo">Signal<em>.</em></div>
+    <div class="nav-logo">Sharflow<em>.</em></div>
     <div class="nav-actions">
       <button class="btn btn-ghost" onclick="openAuthModal('login')">Sign in</button>
       <button class="btn btn-primary" onclick="openAuthModal('signup')">Get started</button>
@@ -45,14 +45,14 @@
   <section class="hero">
     <div class="hero-eyebrow">Personal intelligence, not generic news</div>
     <h1>Your morning brief,<br/><span>built only for you.</span></h1>
-    <p class="hero-lead">Signal learns your role, topics, and noise filters — then curates real stories from live sources into one focused digest.</p>
+    <p class="hero-lead">Sharflow learns your role, topics, and noise filters — then curates real stories from live sources into one focused digest.</p>
     <div class="hero-actions">
       <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
       <button class="btn btn-secondary btn-lg" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">How it works</button>
     </div>
 
     <div class="preview-card">
-      <div class="preview-bar">Your Signal · Today, 8:00 AM</div>
+      <div class="preview-bar">Your Sharflow · Today, 8:00 AM</div>
       <div class="preview-body">
         <div class="preview-item">
           <strong>OpenAI ships reasoning model — impact on your PM workflow</strong>
@@ -72,7 +72,7 @@
 
   <section class="section alt" id="features">
     <div class="section-inner">
-      <p class="section-label">Why Signal</p>
+      <p class="section-label">Why Sharflow</p>
       <h2 class="section-title">Signal, not noise</h2>
       <div class="features-grid">
         <div class="feature-card">
@@ -85,18 +85,18 @@
         </div>
         <div class="feature-card">
           <h3>Professional dashboard</h3>
-          <p>View your latest digest, review your profile, and track what Signal is learning about you.</p>
+          <p>View your latest digest, review your profile, and track what Sharflow is learning about you.</p>
         </div>
         <div class="feature-card">
           <h3>Always improving</h3>
-          <p>Reset your profile anytime. Signal learns what matters to you with every digest.</p>
+          <p>Reset your profile anytime. Sharflow learns what matters to you with every digest.</p>
         </div>
       </div>
     </div>
   </section>
 
   <footer>
-    <p>© 2026 Signal · Personalized digest platform · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
+    <p>© 2026 Sharflow · Personalized digest platform · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
   </footer>
 </div>
 
@@ -130,7 +130,7 @@
 <div id="app-shell">
   <header class="app-topbar">
     <div>
-      <span class="app-topbar-title">Signal.</span>
+      <span class="app-topbar-title">Sharflow.</span>
       <span class="app-badge" id="phase-label">Setup</span>
     </div>
     <button class="btn btn-ghost btn-sm" onclick="resetAll()">Reset</button>

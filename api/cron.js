@@ -204,7 +204,7 @@ async function generateDigest(user, news) {
     profile.tone       && `Tone: ${profile.tone}`,
   ].filter(Boolean).join("\n");
 
-  const systemInstruction = `You are Signal — a ruthlessly precise personal intelligence system.
+  const systemInstruction = `You are Sharflow — a ruthlessly precise personal intelligence system.
 
 MANDATORY RULES — violating any is a critical failure:
 1. EXACTLY 2 sentences per story. Not 1. Not 3. Count them. Stop at 2.
@@ -227,7 +227,7 @@ ${articleText}
 OUTPUT FORMAT — follow exactly:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR SIGNAL · ${today}
+YOUR SHARFLOW · ${today}
 
 🔥 TOP STORIES
 
@@ -285,7 +285,7 @@ YOUR SIGNAL · ${today}
 // ── SEND EMAIL ─────────────────────────────────────────────────────────────────
 async function sendDigestEmail(user, digestContent) {
   const apiKey    = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.FROM_EMAIL || "Signal <onboarding@resend.dev>").trim();
+  const fromEmail = (process.env.FROM_EMAIL || "Sharflow <onboarding@resend.dev>").trim();
   if (!apiKey) throw new Error("RESEND_API_KEY not set");
 
   const profile = user.profile || {};
@@ -304,12 +304,12 @@ async function sendDigestEmail(user, digestContent) {
     .replace(/\n/g, "<br/>");
 
   const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Your Signal — ${date}</title></head>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Your Sharflow — ${date}</title></head>
 <body style="margin:0;padding:0;background:#FAFAF8;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#1A1A18;">
 <div style="padding:24px 16px;">
   <div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #E8E6E0;border-radius:12px;overflow:hidden;">
     <div style="background:#1A1A18;padding:18px 28px;display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.02em;">Signal.</div>
+      <div style="font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.02em;">Sharflow.</div>
       <div style="font-size:12px;color:rgba(255,255,255,0.5);">${date}</div>
     </div>
     <div style="padding:28px 32px;font-size:14px;line-height:1.8;color:#1A1A18;">
@@ -326,7 +326,7 @@ async function sendDigestEmail(user, digestContent) {
   const res = await withTimeout(fetch(RESEND_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Signal — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.com/unsubscribe>" } }),
+    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Sharflow — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.com/unsubscribe>" } }),
   }), TIMEOUT_MS);
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || "Resend error");

@@ -1,5 +1,5 @@
 /**
- * Signal — Admin API Status Endpoint (/api/admin-status)
+ * Sharflow — Admin API Status Endpoint (/api/admin-status)
  *
  * Checks health, connectivity, latency, and status across all external service dependencies:
  * - MongoDB Atlas
@@ -384,7 +384,7 @@ async function checkResend() {
       message: `API Key verified via read-only domains endpoint (${domains.length} domain(s) configured).`,
       extra: {
         configuredDomains: domains,
-        senderFrom: process.env.FROM_EMAIL || "Signal <onboarding@resend.dev>",
+        senderFrom: process.env.FROM_EMAIL || "Sharflow <onboarding@resend.dev>",
       },
     };
   } catch (err) {

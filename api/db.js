@@ -1,5 +1,5 @@
 /**
- * Signal — Database Connection Manager
+ * Sharflow — Database Connection Manager
  * 
  * Production-ready MongoDB connection manager.
  * Caches the connection promise globally across warm serverless function

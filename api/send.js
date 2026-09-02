@@ -7,7 +7,7 @@
  *
  * Required env vars (set in Vercel project settings):
  *   RESEND_API_KEY   — from resend.com dashboard
- *   FROM_EMAIL       — e.g. "Signal <digest@yourdomain.com>"
+ *   FROM_EMAIL       — e.g. "Sharflow <digest@yourdomain.com>"
  *                      must be a verified domain in Resend
  */
 
@@ -34,7 +34,7 @@ function welcomeHtml({ name, profileSummary, unlockDate, email }) {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Welcome to Signal</title>
+<title>Welcome to Sharflow</title>
 <style>
   body { margin:0; padding:0; background:#FAFAF8; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color:#1A1A18; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:580px; margin:0 auto; background:#fff; border:1px solid #E8E6E0; border-radius:12px; overflow:hidden; }
@@ -59,7 +59,7 @@ function welcomeHtml({ name, profileSummary, unlockDate, email }) {
 <div style="padding:24px 16px;">
   <div class="wrap">
     <div class="header">
-      <div class="header-logo">Signal<span>.</span></div>
+      <div class="header-logo">Sharflow<span>.</span></div>
     </div>
     <div class="body">
       <div class="greeting">Welcome, ${firstName}!</div>
@@ -73,14 +73,14 @@ function welcomeHtml({ name, profileSummary, unlockDate, email }) {
       <hr class="divider"/>
 
       <p class="lock-note">
-        Your profile is locked until <strong>${unlockDate}</strong> so Signal can tune your digest over the first week.
+        Your profile is locked until <strong>${unlockDate}</strong> so Sharflow can tune your digest over the first week.
         After that you can update it anytime from your dashboard.
       </p>
 
-      <a class="cta" href="https://signal.app">Open your dashboard →</a>
+      <a class="cta" href="https://sharflow.com">Open your dashboard →</a>
     </div>
     <div class="footer">
-      <p>You're receiving this because you signed up at signal.app with ${email}</p>
+      <p>You're receiving this because you signed up for Sharflow with ${email}</p>
       <p style="margin-top:6px;"><a href="#">Unsubscribe</a> · <a href="#">Privacy</a></p>
     </div>
   </div>
@@ -105,7 +105,7 @@ function digestHtml({ name, digestContent, date }) {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Your Signal digest — ${date}</title>
+<title>Your Sharflow digest — ${date}</title>
 <style>
   body { margin:0; padding:0; background:#FAFAF8; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; color:#1A1A18; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:580px; margin:0 auto; background:#fff; border:1px solid #E8E6E0; border-radius:12px; overflow:hidden; }
@@ -123,7 +123,7 @@ function digestHtml({ name, digestContent, date }) {
 <div style="padding:24px 16px;">
   <div class="wrap">
     <div class="header">
-      <div class="header-logo">Signal.</div>
+      <div class="header-logo">Sharflow.</div>
       <div class="header-date">${date}</div>
     </div>
     <div class="body">
@@ -152,7 +152,7 @@ async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.FROM_EMAIL || "Signal <onboarding@resend.dev>").trim();
+  const fromEmail = (process.env.FROM_EMAIL || "Sharflow <onboarding@resend.dev>").trim();
 
   if (!apiKey) {
     return res.status(400).json({ error: "Missing RESEND_API_KEY env var. Add it in Vercel project settings." });
@@ -173,7 +173,7 @@ async function handler(req, res) {
       const profileSummary = body.profileSummary || "";
       const unlockDate = body.unlockDate || "";
 
-      subject = `Welcome to Signal${name ? `, ${name.split(" ")[0]}` : ""} — your digest starts tomorrow`;
+      subject = `Welcome to Sharflow${name ? `, ${name.split(" ")[0]}` : ""} — your digest starts tomorrow`;
       html = welcomeHtml({ name, profileSummary, unlockDate, email: toEmail });
 
     // ── DIGEST ───────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ async function handler(req, res) {
 
       if (!digestContent) return res.status(400).json({ error: "digestContent is required" });
 
-      subject = `Your Signal digest — ${date}`;
+      subject = `Your Sharflow digest — ${date}`;
       html = digestHtml({ name, digestContent, date });
 
     } else {

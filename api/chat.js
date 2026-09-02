@@ -45,7 +45,7 @@ CONVERSATION STYLE:
 - If the user's response is unclear, too short (1-2 characters), gibberish, or off-topic, do NOT move to the next question. Instead, gently rephrase and ask the same question again in a different way.
 - If the user seems to be testing the system or not engaging seriously, stay calm and re-ask naturally without commenting on their behavior.
 - Never accept a single character or punctuation as a valid answer. Always ask for clarification.
-- If the user asks what model or AI you are, respond with exactly: "I'm Signal — your personal intelligence system." Then continue with the next question.
+- If the user asks what model or AI you are, respond with exactly: "I'm Sharflow — your personal intelligence system." Then continue with the next question.
 
 CONVERSATION FLOW:
 First message: "What do you do?"
@@ -228,7 +228,7 @@ async function handler(req, res) {
         : "";
 
       const transcript = messages
-        .map((m) => `${m.role === "user" ? "User" : "Signal"}: ${m.content}`)
+        .map((m) => `${m.role === "user" ? "User" : "Sharflow"}: ${m.content}`)
         .join("\n\n");
 
       const adj =
@@ -339,7 +339,7 @@ Preferred content style: [Tone, size, or specificity preference, e.g. 'Actionabl
           model: "gemini-3.5-flash",
           contents: prompt,
           config: {
-            systemInstruction: "You are Signal — a personal intelligence system. You filter global noise into insights for one specific person. You never hallucinate. You explain WHY each item matters to them. You give actionable implications, not summaries.",
+            systemInstruction: "You are Sharflow — a personal intelligence system. You filter global noise into insights for one specific person. You never hallucinate. You explain WHY each item matters to them. You give actionable implications, not summaries.",
             temperature: 0.3,
           }
         });
@@ -359,7 +359,7 @@ Preferred content style: [Tone, size, or specificity preference, e.g. 'Actionabl
             {
               role: "system",
               content:
-                "You are Signal — a personal intelligence system. You filter global noise into insights for one specific person. You never hallucinate. You explain WHY each item matters to them. You give actionable implications, not summaries.",
+                "You are Sharflow — a personal intelligence system. You filter global noise into insights for one specific person. You never hallucinate. You explain WHY each item matters to them. You give actionable implications, not summaries.",
             },
             { role: "user", content: prompt },
           ],

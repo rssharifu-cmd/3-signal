@@ -1,4 +1,4 @@
-/* Signal — client application */
+/* Sharflow — client application */
 
 const STORAGE = {
   lock: "signal_lock_until",

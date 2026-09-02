@@ -1,4 +1,4 @@
-# Signal — Personalized AI News Digest
+# Sharflow — Personalized AI News Digest
 
 Professional onboarding, live-news pipeline, and a dashboard that generates real digests (not placeholder copy).
 

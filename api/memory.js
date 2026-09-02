@@ -1,5 +1,5 @@
 /**
- * Lightweight per-user memory for Signal personalization.
+ * Lightweight per-user memory for Sharflow personalization.
  * No conversation history — only structured signals.
  */
 
@@ -241,7 +241,7 @@ ${newsRules}
 OUTPUT FORMAT (follow exactly, preserving character dividers and icons):
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR SIGNAL · ${today}
+YOUR SHARFLOW · ${today}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🔥 TOP STORIES

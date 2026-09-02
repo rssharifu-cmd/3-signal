@@ -1,5 +1,5 @@
 /**
- * Signal — Standalone Digest Sender Script
+ * Sharflow — Standalone Digest Sender Script
  * Intended to be executed as a daily cron job via GitHub Actions.
  * 
  * Flow:
@@ -215,8 +215,14 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
           }),
           TIMEOUT_MS
         );
-        if (!res.ok) return [];
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          console.error(`[fetchCandidates] [Tavily] HTTP ${res.status} error for query "${query}": ${errBody.slice(0, 200)}`);
+          return [];
+        }
         const data = await res.json();
+        const rawCount = (data.results || []).length;
+        console.log(`[fetchCandidates] [Tavily] Query "${query}" returned ${rawCount} raw results`);
         return (data.results || []).map((r) => ({
           source: "tavily",
           title: r.title || "",
@@ -225,6 +231,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
           queryIntent: qObj.intent,
         }));
       } catch (err) {
+        console.error(`[fetchCandidates] [Tavily] Error fetching query "${query}": ${err.message}`);
         return [];
       }
     } else if (source === "reddit") {
@@ -234,8 +241,14 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
           fetch(url, { headers: { "User-Agent": "Signal-NewsDigest/1.0 (by /u/sharflow)" } }),
           TIMEOUT_MS
         );
-        if (!res.ok) return [];
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          console.error(`[fetchCandidates] [Reddit] HTTP ${res.status} error for query "${query}": ${errBody.slice(0, 200)}`);
+          return [];
+        }
         const data = await res.json();
+        const rawCount = (data?.data?.children || []).length;
+        console.log(`[fetchCandidates] [Reddit] Query "${query}" returned ${rawCount} raw results`);
         return (data?.data?.children || [])
           .filter((p) => !p.data?.stickied && !p.data?.over_18 && p.data?.title)
           .map((p) => ({
@@ -246,6 +259,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
             queryIntent: qObj.intent,
           }));
       } catch (err) {
+        console.error(`[fetchCandidates] [Reddit] Error fetching query "${query}": ${err.message}`);
         return [];
       }
     } else if (source === "youtube") {
@@ -263,8 +277,14 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
           key: youtubeKey,
         });
         const res = await withTimeout(fetch(`${YOUTUBE_URL}?${params}`), TIMEOUT_MS);
-        if (!res.ok) return [];
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => "");
+          console.error(`[fetchCandidates] [YouTube] HTTP ${res.status} error for query "${query}": ${errBody.slice(0, 200)}`);
+          return [];
+        }
         const data = await res.json();
+        const rawCount = (data.items || []).length;
+        console.log(`[fetchCandidates] [YouTube] Query "${query}" returned ${rawCount} raw results`);
         return (data.items || [])
           .filter((i) => i.snippet?.title?.length > 10)
           .map((item) => ({
@@ -275,6 +295,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
             queryIntent: qObj.intent,
           }));
       } catch (err) {
+        console.error(`[fetchCandidates] [YouTube] Error fetching query "${query}": ${err.message}`);
         return [];
       }
     }
@@ -535,7 +556,7 @@ async function generateDigest(user, news) {
     profile.tone       && `Tone: ${profile.tone}`,
   ].filter(Boolean).join("\n");
 
-  const systemInstruction = "You are Signal — a precise personal intelligence system.";
+  const systemInstruction = "You are Sharflow — a precise personal intelligence system.";
 
   const prompt = buildDigestPrompt({
     memoryText,
@@ -594,7 +615,7 @@ async function generateDigest(user, news) {
 // ── SEND EMAIL ─────────────────────────────────────────────────────────────────
 async function sendDigestEmail(user, digestContent) {
   const apiKey    = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.FROM_EMAIL || "Signal <onboarding@resend.dev>").trim();
+  const fromEmail = (process.env.FROM_EMAIL || "Sharflow <onboarding@resend.dev>").trim();
   if (!apiKey) throw new Error("RESEND_API_KEY not set");
 
   const profile = user.profile || {};
@@ -613,12 +634,12 @@ async function sendDigestEmail(user, digestContent) {
     .replace(/\n/g, "<br/>");
 
   const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Your Signal — ${date}</title></head>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Your Sharflow — ${date}</title></head>
 <body style="margin:0;padding:0;background:#FAFAF8;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#1A1A18;">
 <div style="padding:24px 16px;">
   <div style="max-width:580px;margin:0 auto;background:#fff;border:1px solid #E8E6E0;border-radius:12px;overflow:hidden;">
     <div style="background:#1A1A18;padding:18px 28px;display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.02em;">Signal.</div>
+      <div style="font-size:18px;font-weight:700;color:#fff;letter-spacing:-0.02em;">Sharflow.</div>
       <div style="font-size:12px;color:rgba(255,255,255,0.5);">${date}</div>
     </div>
     <div style="padding:28px 32px;font-size:14px;line-height:1.8;color:#1A1A18;">
@@ -635,7 +656,7 @@ async function sendDigestEmail(user, digestContent) {
   const res = await withTimeout(fetch(RESEND_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Signal — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.com/unsubscribe>" } }),
+    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Sharflow — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.com/unsubscribe>" } }),
   }), TIMEOUT_MS);
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || "Resend error");

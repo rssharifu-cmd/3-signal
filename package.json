@@ -2,7 +2,7 @@
   "name": "signal",
   "private": true,
   "version": "1.0.0",
-  "description": "Signal — World's most personalized AI news digest",
+  "description": "Sharflow — World's most personalized AI news digest",
   "engines": {
     "node": ">=18"
   },
