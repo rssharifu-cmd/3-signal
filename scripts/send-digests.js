@@ -192,7 +192,7 @@ function isValidDomain(str) {
 }
 
 // ── STAGE 2 — CANDIDATE POOL FETCH ───────────────────────────────────────────
-async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
+async function fetchCandidates(queries, avoid, publishedAfterStr, daysBack, sentUrls) {
   const tavilyKey  = (process.env.TAVILY_API_KEY  || "").trim();
   const youtubeKey = (process.env.YOUTUBE_API_KEY || "").trim();
   const avoidList  = (avoid || "")
@@ -218,7 +218,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, sentUrls) {
               include_raw_content: false,
               max_results: 6,
               ...(excludeDomains.length > 0 ? { exclude_domains: excludeDomains } : {}),
-              publishedAfter: publishedAfterStr,
+              days: daysBack,
             }),
           }),
           TIMEOUT_MS
@@ -502,6 +502,7 @@ async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
     startTimeWindow = new Date(Date.now() - 48 * 60 * 60 * 1000);
   }
   const publishedAfterStr = startTimeWindow.toISOString();
+  const daysBack = Math.max(1, Math.ceil((Date.now() - startTimeWindow.getTime()) / (24 * 60 * 60 * 1000)));
 
   const sentUrls = new Set();
   if (lastDigest && lastDigest.content) {
@@ -517,7 +518,7 @@ async function fetchNews(db, user, topics, profession, avoid, lastDigest) {
   console.log(`[NEWS] ${user.email} — generated ${queries.length} targeted queries [${queries.map((q) => `${q.source}: "${q.query}"`).join("; ")}]`);
 
   // Stage 2: Candidate Pool Fetch (aiming for 20-30 candidates)
-  const candidates = await fetchCandidates(queries, avoid || (memory.dislikedTopics || []).join(", "), publishedAfterStr, sentUrls);
+  const candidates = await fetchCandidates(queries, avoid || (memory.dislikedTopics || []).join(", "), publishedAfterStr, daysBack, sentUrls);
   console.log(`[NEWS] ${user.email} — fetched ${candidates.length} unique candidates`);
 
   if (candidates.length === 0) {

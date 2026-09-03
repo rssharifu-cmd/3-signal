@@ -272,7 +272,8 @@ STRICT WRITING DIRECTIVES:
 - NO LABELS: Never write "WHAT:", "WHY YOU:", "ACTION:", "WHY IT MATTERS:", or "IMPLICATION:". Deliver pure synthesized intelligence.
 - NO CLINICAL AI HYPNOTICS: Never use phrases like "may have implications", "could impact", "important to understand", "as a professional in...", "significant development", "it is critical to".
 - INSIGHT FIRST: Do not write "AI is transforming industries." Instead write: "Small agencies are starting to substitute whole creative departments with local open-source pipelines."
-- BE PRECISE AND DIRECT: Provide concrete figures, realistic scenarios, or sharp opportunism. Sound like a smart, elite colleague.`;
+- BE PRECISE AND DIRECT: Provide concrete figures, realistic scenarios, or sharp opportunism. Sound like a smart, elite colleague.
+- STRICT FACTUAL GROUNDING: Only use statistics, numbers, or specific claims that are explicitly present in the provided article title/snippet text. Do not invent, estimate, extrapolate, or round numbers that aren't stated in the source material. If a story lacks concrete numbers, describe it qualitatively instead of inventing figures to sound more specific. Do not attribute a causal reason (e.g. 'to cover X costs') to a statistic unless that reason is explicitly stated alongside it in the source snippet.`;
 }
 
 module.exports = {
