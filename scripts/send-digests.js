@@ -213,6 +213,7 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, daysBack, sent
             body: JSON.stringify({
               api_key: tavilyKey,
               query: query,
+              topic: "news",
               search_depth: "advanced",
               include_answer: false,
               include_raw_content: false,
@@ -231,6 +232,9 @@ async function fetchCandidates(queries, avoid, publishedAfterStr, daysBack, sent
         const data = await res.json();
         const rawCount = (data.results || []).length;
         console.log(`[fetchCandidates] [Tavily] Query "${query}" returned ${rawCount} raw results`);
+        for (const r of data.results || []) {
+          console.log(`[Tavily] "${r.title}" — published: ${r.published_date || r.published || "unknown"}`);
+        }
         return (data.results || []).map((r) => ({
           source: "tavily",
           title: r.title || "",
