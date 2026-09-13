@@ -1,6 +1,6 @@
 {
   "name": "Sharflow",
-  "description": "Sharflow — World's most personalized AI news digest, filtering noise into insights, powered by Gemini.",
+  "description": "AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

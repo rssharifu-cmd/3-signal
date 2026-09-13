@@ -3,8 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Sharflow — personalized AI news digest delivered daily." />
-  <title>Sharflow — Your AI reads the internet for you</title>
+  <meta name="description" content="AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention." />
+  <meta property="og:title" content="Sharflow — AI Website Watchdog" />
+  <meta property="og:description" content="AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention." />
+  <title>Sharflow — AI Website Watchdog</title>
   <script>
     // Safeguard to prevent "TypeError: Cannot set property fetch of #<Window> which has only a getter"
     // which can occur in sandboxed frame wrappers or extensions attempting to proxy/override fetch.
@@ -42,61 +44,244 @@
     </div>
   </nav>
 
+  <!-- Hero -->
   <section class="hero">
-    <div class="hero-eyebrow">Personal intelligence, not generic news</div>
-    <h1>Your morning brief,<br/><span>built only for you.</span></h1>
-    <p class="hero-lead">Sharflow learns your role, topics, and noise filters — then curates real stories from live sources into one focused digest.</p>
+    <div class="hero-eyebrow">AI Website Watchdog</div>
+    <h1>Your website may have problems<br/><span>you're not seeing.</span></h1>
+    <p class="hero-lead">Let your AI Watchdog monitor search rankings, traffic drops, and site health 24/7. Get alerted only when something important needs attention — or when your website is winning.</p>
     <div class="hero-actions">
       <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
-      <button class="btn btn-secondary btn-lg" onclick="document.getElementById('features').scrollIntoView({behavior:'smooth'})">How it works</button>
+      <button class="btn btn-secondary btn-lg" onclick="document.getElementById('how-it-works').scrollIntoView({behavior:'smooth'})">How it works</button>
     </div>
 
+    <!-- Hero Watchdog preview card -->
     <div class="preview-card">
-      <div class="preview-bar">Your Sharflow · Today, 8:00 AM</div>
+      <div class="preview-bar" style="display:flex;justify-content:space-between;align-items:center;padding:10px 18px;">
+        <span>AI Watchdog Morning Brief · 08:00 AM</span>
+        <span class="badge-pill badge-alert" style="font-size:10px;">1 Priority Action</span>
+      </div>
       <div class="preview-body">
         <div class="preview-item">
-          <strong>OpenAI ships reasoning model — impact on your PM workflow</strong>
-          <span>Matched to AI &amp; product · via TechCrunch</span>
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+            <strong>Organic visibility drop on /pricing</strong>
+            <span style="color:#DC2626;font-size:11px;font-weight:700;">-38% Impressions</span>
+          </div>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:8px;">Search Console detected top query "team collaboration tool" slipped from #4 to #11 following yesterday's title tag update.</p>
+          <div style="background:var(--surface-2);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);">
+            <strong style="color:var(--accent);">Next step:</strong> Revert title tag or restore the primary target keyword to head elements.
+          </div>
         </div>
-        <div class="preview-item">
-          <strong>Lenny Rachitsky: How agents replace SaaS (38 min)</strong>
-          <span>Skip to 12:30 · matched to your startup focus</span>
-        </div>
-        <div class="preview-item">
-          <strong>One action: Audit one repetitive task for agent automation</strong>
-          <span>Tailored to your stated goal this week</span>
+        <div class="preview-item" style="border-bottom:none;padding-bottom:0;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">
+            <strong>Ranking surge on /blog/workflows</strong>
+            <span style="color:var(--green);font-size:11px;font-weight:700;">+4 Ranks (#3)</span>
+          </div>
+          <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:0;">High-intent keyword gained top-3 placement. Weekly clicks up +22%.</p>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section alt" id="features">
+  <!-- How it works -->
+  <section class="section alt" id="how-it-works">
     <div class="section-inner">
-      <p class="section-label">Why Sharflow</p>
-      <h2 class="section-title">Signal, not noise</h2>
-      <div class="features-grid">
-        <div class="feature-card">
-          <h3>Guided onboarding</h3>
-          <p>Five-step profile setup in under 90 seconds — role, topics, and news preferences tuned to you.</p>
+      <p class="section-label">How it works</p>
+      <h2 class="section-title">Zero dashboards. Pure signal.</h2>
+      <p class="section-desc">You don't need another analytics tool to check every morning. Watchdog turns raw metrics into clear, verified actions.</p>
+      
+      <div class="steps-grid">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <h3>Connect your website</h3>
+          <p>Takes under 2 minutes. Connect your Google Search Console and analytics with zero coding required.</p>
         </div>
-        <div class="feature-card">
-          <h3>Live source pipeline</h3>
-          <p>Tavily search, RSS, Reddit, and YouTube feed real articles into your digest — not hallucinated headlines.</p>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <h3>Deterministic anomaly detection</h3>
+          <p>Verified math checks ranking slips, traffic anomalies, indexing errors, and competitor moves — no AI hallucinations.</p>
         </div>
-        <div class="feature-card">
-          <h3>Professional dashboard</h3>
-          <p>View your latest digest, review your profile, and track what Sharflow is learning about you.</p>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <h3>High-signal morning brief</h3>
+          <p>Receive one clear email only when something matters, telling you exactly which page was affected and what to do.</p>
         </div>
-        <div class="feature-card">
-          <h3>Always improving</h3>
-          <p>Reset your profile anytime. Sharflow learns what matters to you with every digest.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Key benefits -->
+  <section class="section" id="benefits">
+    <div class="section-inner">
+      <p class="section-label">Key benefits</p>
+      <h2 class="section-title">Built for founders and website owners</h2>
+      <p class="section-desc">Raw numbers aren't the product. Understanding what changed and what to do next is.</p>
+
+      <div class="benefits-grid">
+        <div class="benefit-card">
+          <span class="benefit-tag">Save 1–2 hours daily</span>
+          <h3>Stop checking 3 tools every morning</h3>
+          <p>No more logging into Google Analytics 4, Search Console, and rank checkers just to see if your traffic is safe.</p>
         </div>
+        <div class="benefit-card">
+          <span class="benefit-tag">Verified intelligence</span>
+          <h3>Deterministic data, zero hallucination</h3>
+          <p>Mathematical anomaly engines verify real data changes first. AI is only used to interpret verified changes and draft fixes.</p>
+        </div>
+        <div class="benefit-card">
+          <span class="benefit-tag">Actionable clarity</span>
+          <h3>Root causes and exact next steps</h3>
+          <p>We answer: What changed? Is it important? Why did it happen? Which page was affected? What should I do next?</p>
+        </div>
+        <div class="benefit-card">
+          <span class="benefit-tag">Attention respect</span>
+          <h3>No repetitive advice or filler</h3>
+          <p>If nothing important changed, we confirm that your site is performing normally. No noise, no false alarms.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- What the Watchdog monitors -->
+  <section class="section alt" id="monitors">
+    <div class="section-inner">
+      <p class="section-label">Coverage</p>
+      <h2 class="section-title">What the Watchdog monitors</h2>
+      <p class="section-desc">Continuous background monitoring across every dimension that impacts your traffic and revenue.</p>
+
+      <div class="monitors-grid">
+        <div class="monitor-card">
+          <div class="monitor-card-header">
+            <h3>Search visibility &amp; rankings</h3>
+          </div>
+          <p>Monitors keyword position drops, lost search impressions, query CTR changes, and ranking cannibalization.</p>
+          <div class="monitor-chips">
+            <span class="monitor-chip">Google Search Console</span>
+            <span class="monitor-chip">Query rank tracking</span>
+            <span class="monitor-chip">CTR anomalies</span>
+          </div>
+        </div>
+
+        <div class="monitor-card">
+          <div class="monitor-card-header">
+            <h3>Traffic &amp; revenue pages</h3>
+          </div>
+          <p>Detects unexpected traffic drops on top-converting pages, homepage traffic shifts, and broken funnels.</p>
+          <div class="monitor-chips">
+            <span class="monitor-chip">Google Analytics 4</span>
+            <span class="monitor-chip">Conversion drop-offs</span>
+            <span class="monitor-chip">Page traffic baseline</span>
+          </div>
+        </div>
+
+        <div class="monitor-card">
+          <div class="monitor-card-header">
+            <h3>Technical &amp; indexing health</h3>
+          </div>
+          <p>Catches accidental noindex tags, 404 error spikes on high-value URLs, redirect loops, and crawl regressions.</p>
+          <div class="monitor-chips">
+            <span class="monitor-chip">Index status</span>
+            <span class="monitor-chip">404 error spikes</span>
+            <span class="monitor-chip">Crawl regressions</span>
+          </div>
+        </div>
+
+        <div class="monitor-card">
+          <div class="monitor-card-header">
+            <h3>Competitive &amp; web intelligence</h3>
+          </div>
+          <p>Tracks competitor ranking moves, sudden displacement in search SERPs, and industry search shifts.</p>
+          <div class="monitor-chips">
+            <span class="monitor-chip">SERP displacement</span>
+            <span class="monitor-chip">Competitor surge</span>
+            <span class="monitor-chip">Tavily web intelligence</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Daily email example -->
+  <section class="section" id="email-example">
+    <div class="section-inner">
+      <p class="section-label">The deliverable</p>
+      <h2 class="section-title">What arrives in your inbox</h2>
+      <p class="section-desc">A ruthlessly focused brief designed to be read in under 60 seconds.</p>
+
+      <div class="email-showcase">
+        <div class="email-showcase-bar">
+          <div>
+            <strong>Daily Watchdog Brief</strong> · 08:00 AM · acmewidgets.com
+          </div>
+          <div class="email-status-pills">
+            <span class="badge-pill badge-alert">1 Issue Detected</span>
+            <span class="badge-pill badge-healthy">3 Checks Normal</span>
+          </div>
+        </div>
+
+        <div class="email-showcase-body">
+          <div class="email-salutation">Good morning, Alex.</div>
+          <div class="email-summary-line">Watchdog completed 14 checks across Search Console and Analytics over the last 24 hours. Here is what requires your attention today:</div>
+
+          <div class="email-block urgent">
+            <div class="email-block-title">
+              <span>⚠️ Critical Traffic Drop on Core Landing Page</span>
+              <span style="color:#DC2626;font-size:12px;font-weight:700;">Needs Attention</span>
+            </div>
+            <div class="email-detail-row">
+              <span class="lbl">What changed:</span>
+              <span class="val">Organic impressions dropped <strong>-41%</strong> on <code>/pricing</code> over the last 48 hours.</span>
+            </div>
+            <div class="email-detail-row">
+              <span class="lbl">Affected:</span>
+              <span class="val">URL: <code>/pricing</code> · Query: <em>"b2b workflow software"</em> (dropped from #4 to #12)</span>
+            </div>
+            <div class="email-detail-row">
+              <span class="lbl">Why it happened:</span>
+              <span class="val">Title tag was modified during Tuesday's deployment, removing the exact-match keyword.</span>
+            </div>
+            <div class="email-action-box">
+              <strong>Action:</strong>
+              <span>Restore primary keyword to the <code>&lt;title&gt;</code> element on <code>/pricing</code> and inspect canonical URL.</span>
+            </div>
+          </div>
+
+          <div class="email-block positive">
+            <div class="email-block-title">
+              <span>✅ Positive Search Movement</span>
+              <span style="color:var(--green);font-size:12px;font-weight:700;">Healthy</span>
+            </div>
+            <div class="email-detail-row">
+              <span class="lbl">What changed:</span>
+              <span class="val"><code>/guides/automation</code> climbed from position #7 to <strong>#2</strong> on Google.</span>
+            </div>
+            <div class="email-detail-row">
+              <span class="lbl">Impact:</span>
+              <span class="val">+64 clicks/day. Page engagement rate remains strong at 72%.</span>
+            </div>
+          </div>
+
+          <div style="font-size:12px;color:var(--dim);margin-top:20px;text-align:center;border-top:1px solid var(--border);padding-top:16px;">
+            All other 28 monitored URLs and conversion funnels are operating within normal variance.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="section alt" id="cta">
+    <div class="section-inner">
+      <div class="cta-box">
+        <h2>Let your AI Watchdog watch your website.</h2>
+        <p>Stop wasting 1–2 hours checking dashboards every day. Get alerted when something needs attention — and know exactly what to do.</p>
+        <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start Free Trial →</button>
+        <p class="cta-subtext">3-day free trial · No credit card required · Connects in 2 minutes</p>
       </div>
     </div>
   </section>
 
   <footer>
-    <p>© 2026 Sharflow · Personalized digest platform · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
+    <p>© 2026 Sharflow · AI Website Watchdog · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
   </footer>
 </div>
 
