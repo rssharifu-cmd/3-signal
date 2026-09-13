@@ -77,6 +77,11 @@ function applyUserToLocalState(user) {
       STORAGE.profileForm,
       JSON.stringify({
         name: user.name || existing.name || "",
+        websiteUrl: user.profile.websiteUrl || existing.websiteUrl || "",
+        websiteType: user.profile.websiteType || existing.websiteType || "",
+        websitePurpose: user.profile.websitePurpose || existing.websitePurpose || "",
+        monitoringPriorities: user.profile.monitoringPriorities || existing.monitoringPriorities || [],
+        importantPages: user.profile.importantPages || existing.importantPages || [],
         profession: user.profile.profession || existing.profession || "",
         goals: user.profile.goals || existing.goals || "",
         topics: user.profile.topics || existing.topics || "",
@@ -84,7 +89,7 @@ function applyUserToLocalState(user) {
         customSources: user.profile.customSources || existing.customSources || "",
         language: user.profile.language || existing.language || "English",
         country: user.profile.country || existing.country || "United States",
-        newsScope: user.profile.newsScope || existing.newsScope || "Mixed",
+        newsScope: user.profile.newsScope || existing.newsScope || "Website Performance",
         digestLength: user.profile.digestLength || existing.digestLength || "Standard",
         digestTime: user.profile.digestTime || existing.digestTime || "08:00",
         timezone: user.profile.timezone || existing.timezone || "UTC",
@@ -220,297 +225,470 @@ async function handleLogin() {
   }
 }
 
-// ── Conversational Onboarding ────────────────────────────────────────────────
-let onboardingMessages = [];
-let isSummaryRendered = false;
+// ── Structured Website Watchdog Onboarding ──────────────────────────────────
+const WEBSITE_TYPES = [
+  "Business / Company",
+  "E-commerce / Online Store",
+  "SaaS / Web App",
+  "Blog / Content",
+  "News / Publisher",
+  "Agency / Services",
+  "Portfolio / Personal",
+  "Community / Membership",
+  "Other",
+];
 
-function updateConversationalProgress() {
-  const fill = document.getElementById("conversational-progress-fill");
-  if (!fill) return;
-  if (isSummaryRendered) {
-    fill.style.width = "100%";
-    return;
-  }
-  const userMessagesCount = onboardingMessages.filter(m => m.role === "user").length;
-  const pct = Math.min((userMessagesCount + 1) * 20, 100);
-  fill.style.width = `${pct}%`;
-}
+const WEBSITE_PURPOSES = [
+  "Generate leads",
+  "Sell products",
+  "Get signups",
+  "Get bookings or inquiries",
+  "Grow organic traffic",
+  "Publish content",
+  "Showcase a business",
+  "Other",
+];
+
+const MONITORING_PRIORITIES = [
+  "Search visibility",
+  "Traffic changes",
+  "Important pages",
+  "Technical / indexing problems",
+  "Leads / conversions",
+  "Content opportunities",
+  "All important changes",
+];
+
+let onboardingData = {
+  websiteUrl: "",
+  websiteType: "",
+  websitePurpose: "",
+  monitoringPriorities: [],
+  importantPages: [],
+};
+
+let currentOnboardStep = 1;
 
 function showOnboarding() {
   document.getElementById("landing-view").classList.add("hidden");
   document.getElementById("app-shell").style.display = "flex";
-  document.getElementById("phase-label").textContent = "Onboarding";
+  document.getElementById("phase-label").textContent = "Setup";
   document.getElementById("onboarding-view").classList.remove("hidden");
   document.getElementById("dashboard-view").classList.add("hidden");
 
-  // Reset chat state
-  onboardingMessages = [];
-  isSummaryRendered = false;
-  const container = document.getElementById("onboard-chat-inner");
-  if (container) {
-    container.innerHTML = "";
-  }
+  // Pre-seed from existing form or reset
+  const saved = getSavedForm();
+  onboardingData = {
+    websiteUrl: saved.websiteUrl || "",
+    websiteType: saved.websiteType || "",
+    websitePurpose: saved.websitePurpose || "",
+    monitoringPriorities: Array.isArray(saved.monitoringPriorities) ? [...saved.monitoringPriorities] : [],
+    importantPages: Array.isArray(saved.importantPages) ? [...saved.importantPages] : [],
+  };
 
-  // Seed with initial prompt
-  const initialGreeting = "What do you do?";
-  onboardingMessages.push({ role: "assistant", content: initialGreeting });
-  renderOnboardMessage("assistant", initialGreeting);
+  const urlInput = document.getElementById("ob-website-url");
+  if (urlInput) urlInput.value = onboardingData.websiteUrl;
+
+  renderTypeOptions();
+  renderPurposeOptions();
+  renderPriorityOptions();
+
+  const pagesInput = document.getElementById("ob-important-pages");
+  if (pagesInput) pagesInput.value = onboardingData.importantPages.join("\n");
+
+  goToOnboardStep(1);
 }
 
-function renderOnboardMessage(role, content) {
-  const container = document.getElementById("onboard-chat-inner");
-  if (!container) return;
+function updateOnboardProgress(stepNum) {
+  const progressBar = document.getElementById("onboard-progress-bar");
+  const stepLabel = document.getElementById("onboard-step-indicator");
+  if (!progressBar || !stepLabel) return;
 
-  const msgDiv = document.createElement("div");
-  msgDiv.className = `msg ${role === "user" ? "user" : "bot"}`;
+  const pct = stepNum === 1 ? 20
+            : stepNum === 2 ? 40
+            : stepNum === 3 ? 60
+            : stepNum === 4 ? 80
+            : stepNum === 5 ? 95
+            : 100;
 
-  if (role !== "user") {
-    const avatar = document.createElement("div");
-    avatar.className = "msg-avatar";
-    avatar.textContent = "S";
-    msgDiv.appendChild(avatar);
-  }
-
-  const bubble = document.createElement("div");
-  bubble.className = "msg-bubble";
-  
-  if (role === "user") {
-    bubble.textContent = content;
-  } else {
-    bubble.innerHTML = formatBotHtml(content);
-  }
-  msgDiv.appendChild(bubble);
-  container.appendChild(msgDiv);
-
-  const scrollContainer = document.getElementById("onboard-chat-messages");
-  if (scrollContainer) {
-    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-  }
-  updateConversationalProgress();
+  progressBar.style.width = `${pct}%`;
+  stepLabel.textContent = stepNum <= 5 ? `Step ${stepNum} of 5` : "Review & Confirm";
 }
 
-function showOnboardTypingIndicator() {
-  const container = document.getElementById("onboard-chat-inner");
-  if (!container || document.getElementById("onboard-typing-indicator")) return;
+function goToOnboardStep(stepNum) {
+  currentOnboardStep = stepNum;
+  updateOnboardProgress(stepNum);
 
-  const flowDiv = document.createElement("div");
-  flowDiv.className = "typing-row";
-  flowDiv.id = "onboard-typing-indicator";
-
-  const avatar = document.createElement("div");
-  avatar.className = "msg-avatar";
-  avatar.textContent = "S";
-  flowDiv.appendChild(avatar);
-
-  const bubble = document.createElement("div");
-  bubble.className = "typing-bubble";
-  bubble.innerHTML = "<span></span><span></span><span></span>";
-  flowDiv.appendChild(bubble);
-
-  container.appendChild(flowDiv);
-
-  const scrollContainer = document.getElementById("onboard-chat-messages");
-  if (scrollContainer) {
-    scrollContainer.scrollTop = scrollContainer.scrollHeight;
-  }
-}
-
-function hideOnboardTypingIndicator() {
-  const el = document.getElementById("onboard-typing-indicator");
-  if (el) el.remove();
-}
-
-async function sendOnboardChatMessage() {
-  const el = document.getElementById("onboard-chat-input");
-  if (!el) return;
-  const val = el.value.trim();
-  if (!val) return;
-
-  el.value = "";
-  el.disabled = true;
-  const btn = document.getElementById("btn-onboard-chat-send");
-  if (btn) btn.disabled = true;
-
-  // Render user message
-  onboardingMessages.push({ role: "user", content: val });
-  renderOnboardMessage("user", val);
-
-  // Show typing indicator
-  showOnboardTypingIndicator();
-
-  try {
-    if (isSummaryRendered) {
-      // Send adjustment to apiChat
-      const res = await apiChat({
-        action: "summary",
-        messages: onboardingMessages,
-        adjustment: val
-      });
-      hideOnboardTypingIndicator();
-      if (res.content) {
-        // Render updated summary!
-        const container = document.getElementById("onboard-chat-inner");
-        if (container) {
-          const summaryDiv = document.createElement("div");
-          summaryDiv.className = "msg bot";
-          
-          const avatar = document.createElement("div");
-          avatar.className = "msg-avatar";
-          avatar.textContent = "S";
-          summaryDiv.appendChild(avatar);
-
-          const bubble = document.createElement("div");
-          bubble.className = "msg-bubble";
-          bubble.style.background = "var(--surface-2)";
-          bubble.style.border = "1px solid var(--border)";
-          bubble.style.padding = "20px";
-          bubble.style.borderRadius = "var(--radius)";
-          bubble.style.width = "100%";
-
-          bubble.innerHTML = `
-            <h3 style="margin-bottom:12px;font-family:var(--serif);font-size:1.35rem;">Updated Intelligence Profile</h3>
-            <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;margin-bottom:12px;color:var(--text);">${escapeHtml(res.content)}</div>
-            <p style="font-size:12px;color:var(--text-muted);margin-bottom:18px;font-style:italic;">Does this look right? Adjust in chat, or tap Confirm to lock your profile.</p>
-            <div class="summary-actions" style="display:flex;gap:10px;">
-              <button class="btn btn-primary" onclick="confirmConversationalProfile('${escapeJS(res.content)}')" style="flex:1;">Confirm & Open Dashboard ✓</button>
-            </div>
-          `;
-          summaryDiv.appendChild(bubble);
-          container.appendChild(summaryDiv);
-
-          const scrollContainer = document.getElementById("onboard-chat-messages");
-          if (scrollContainer) {
-            scrollContainer.scrollTop = scrollContainer.scrollHeight;
-          }
-        }
-      }
-    } else {
-      const res = await apiChat({
-        action: "chat",
-        messages: onboardingMessages
-      });
-
-      hideOnboardTypingIndicator();
-
-      if (res.content) {
-        onboardingMessages.push({ role: "assistant", content: res.content });
-        renderOnboardMessage("assistant", res.content);
-
-        // Check if we are ready to wrap up
-        if (res.readyForSummary || res.content.toLowerCase().includes("got everything i need")) {
-          isSummaryRendered = true;
-          // Trigger profile summary drafting!
-          await getAndRenderProfileSummaryDraft();
-        }
-      }
+  for (let i = 1; i <= 6; i++) {
+    const stepEl = document.getElementById(`onboard-step-${i}`);
+    if (stepEl) {
+      stepEl.classList.toggle("active", i === stepNum);
     }
-  } catch (err) {
-    hideOnboardTypingIndicator();
-    toast("Error: " + err.message);
-  } finally {
-    if (el) {
-      el.disabled = false;
-      el.focus();
-    }
-    if (btn) btn.disabled = false;
+  }
+
+  const wrap = document.getElementById("onboarding-view");
+  if (wrap) wrap.scrollTop = 0;
+
+  if (stepNum === 1) {
+    validateStep1();
+    setTimeout(() => {
+      const el = document.getElementById("ob-website-url");
+      if (el) el.focus();
+    }, 100);
+  } else if (stepNum === 2) {
+    updateTypeContinueButton();
+  } else if (stepNum === 3) {
+    updatePurposeContinueButton();
+  } else if (stepNum === 4) {
+    updatePriorityContinueButton();
+  } else if (stepNum === 6) {
+    renderConfirmationStep();
   }
 }
 
-function handleOnboardChatKey(e) {
-  if (e.key === "Enter" && !e.shiftKey) {
+function isValidUrlOrDomain(val) {
+  if (!val) return false;
+  const clean = val.trim().replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim();
+  return /^[a-zA-Z0-9][-a-zA-Z0-9]*\.[a-zA-Z]{2,}(:\d+)?$/.test(clean) || /^https?:\/\/[^\s]+$/.test(val.trim());
+}
+
+function validateStep1() {
+  const input = document.getElementById("ob-website-url");
+  const err = document.getElementById("ob-url-error");
+  const btn = document.getElementById("btn-step-1");
+  if (!input) return false;
+
+  const val = input.value.trim();
+  const valid = isValidUrlOrDomain(val);
+
+  if (btn) btn.disabled = !valid;
+  if (err && val.length > 3) {
+    err.style.display = valid ? "none" : "block";
+  } else if (err) {
+    err.style.display = "none";
+  }
+  return valid;
+}
+
+function handleStep1Key(e) {
+  if (e.key === "Enter") {
     e.preventDefault();
-    sendOnboardChatMessage();
+    if (validateStep1()) {
+      nextOnboardStep(2);
+    }
   }
 }
 
-async function getAndRenderProfileSummaryDraft() {
-  showOnboardTypingIndicator();
-  try {
-    const res = await apiChat({
-      action: "summary",
-      messages: onboardingMessages
-    });
-    hideOnboardTypingIndicator();
+function renderTypeOptions() {
+  const container = document.getElementById("type-options");
+  if (!container) return;
+  container.innerHTML = "";
 
-    if (res.content) {
-      const container = document.getElementById("onboard-chat-inner");
-      if (!container) return;
+  WEBSITE_TYPES.forEach((type) => {
+    const card = document.createElement("div");
+    card.className = "select-card radio";
+    card.setAttribute("data-value", type);
+    const isSelected = onboardingData.websiteType === type || 
+      (type === "Other" && onboardingData.websiteType && !WEBSITE_TYPES.slice(0, -1).includes(onboardingData.websiteType));
+    
+    if (isSelected) card.classList.add("selected");
 
-      const summaryDiv = document.createElement("div");
-      summaryDiv.className = "msg bot";
-      
-      const avatar = document.createElement("div");
-      avatar.className = "msg-avatar";
-      avatar.textContent = "S";
-      summaryDiv.appendChild(avatar);
+    card.innerHTML = `
+      <span>${type}</span>
+      <span class="card-check">●</span>
+    `;
+    card.onclick = () => selectWebsiteType(type);
+    container.appendChild(card);
+  });
+}
 
-      const bubble = document.createElement("div");
-      bubble.className = "msg-bubble";
-      bubble.style.background = "var(--surface-2)";
-      bubble.style.border = "1px solid var(--border)";
-      bubble.style.padding = "20px";
-      bubble.style.borderRadius = "var(--radius)";
-      bubble.style.width = "100%";
+function selectWebsiteType(type) {
+  const otherWrap = document.getElementById("type-other-wrap");
+  const otherInput = document.getElementById("ob-type-other");
 
-      bubble.innerHTML = `
-        <h3 style="margin-bottom:12px;font-family:var(--serif);font-size:1.35rem;">Draft Intelligence Profile</h3>
-        <div style="font-size:14px;line-height:1.6;white-space:pre-wrap;margin-bottom:12px;color:var(--text);">${escapeHtml(res.content)}</div>
-        <p style="font-size:12px;color:var(--text-muted);margin-bottom:18px;font-style:italic;">Does this look right? Adjust in chat, or tap Confirm to lock your profile.</p>
-        <div class="summary-actions" style="display:flex;gap:10px;">
-          <button class="btn btn-primary" onclick="confirmConversationalProfile('${escapeJS(res.content)}')" style="flex:1;">Confirm & Open Dashboard ✓</button>
-        </div>
-      `;
-      summaryDiv.appendChild(bubble);
-      container.appendChild(summaryDiv);
+  if (type === "Other") {
+    if (otherWrap) otherWrap.style.display = "block";
+    const customVal = otherInput ? otherInput.value.trim() : "";
+    onboardingData.websiteType = customVal || "Other";
+    if (otherInput) otherInput.focus();
+  } else {
+    if (otherWrap) otherWrap.style.display = "none";
+    onboardingData.websiteType = type;
+  }
 
-      const scrollContainer = document.getElementById("onboard-chat-messages");
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+  document.querySelectorAll("#type-options .select-card").forEach((c) => {
+    c.classList.toggle("selected", c.getAttribute("data-value") === type);
+  });
+
+  updateTypeContinueButton();
+}
+
+function handleTypeOtherInput() {
+  const input = document.getElementById("ob-type-other");
+  if (!input) return;
+  onboardingData.websiteType = input.value.trim() || "Other";
+  updateTypeContinueButton();
+}
+
+function updateTypeContinueButton() {
+  const btn = document.getElementById("btn-step-2");
+  if (btn) {
+    btn.disabled = !onboardingData.websiteType;
+  }
+}
+
+function renderPurposeOptions() {
+  const container = document.getElementById("purpose-options");
+  if (!container) return;
+  container.innerHTML = "";
+
+  WEBSITE_PURPOSES.forEach((purpose) => {
+    const card = document.createElement("div");
+    card.className = "select-card radio";
+    card.setAttribute("data-value", purpose);
+    const isSelected = onboardingData.websitePurpose === purpose ||
+      (purpose === "Other" && onboardingData.websitePurpose && !WEBSITE_PURPOSES.slice(0, -1).includes(onboardingData.websitePurpose));
+
+    if (isSelected) card.classList.add("selected");
+
+    card.innerHTML = `
+      <span>${purpose}</span>
+      <span class="card-check">●</span>
+    `;
+    card.onclick = () => selectWebsitePurpose(purpose);
+    container.appendChild(card);
+  });
+}
+
+function selectWebsitePurpose(purpose) {
+  const otherWrap = document.getElementById("purpose-other-wrap");
+  const otherInput = document.getElementById("ob-purpose-other");
+
+  if (purpose === "Other") {
+    if (otherWrap) otherWrap.style.display = "block";
+    const customVal = otherInput ? otherInput.value.trim() : "";
+    onboardingData.websitePurpose = customVal || "Other";
+    if (otherInput) otherInput.focus();
+  } else {
+    if (otherWrap) otherWrap.style.display = "none";
+    onboardingData.websitePurpose = purpose;
+  }
+
+  document.querySelectorAll("#purpose-options .select-card").forEach((c) => {
+    c.classList.toggle("selected", c.getAttribute("data-value") === purpose);
+  });
+
+  updatePurposeContinueButton();
+}
+
+function handlePurposeOtherInput() {
+  const input = document.getElementById("ob-purpose-other");
+  if (!input) return;
+  onboardingData.websitePurpose = input.value.trim() || "Other";
+  updatePurposeContinueButton();
+}
+
+function updatePurposeContinueButton() {
+  const btn = document.getElementById("btn-step-3");
+  if (btn) {
+    btn.disabled = !onboardingData.websitePurpose;
+  }
+}
+
+function renderPriorityOptions() {
+  const container = document.getElementById("priority-options");
+  if (!container) return;
+  container.innerHTML = "";
+
+  MONITORING_PRIORITIES.forEach((priority) => {
+    const card = document.createElement("div");
+    card.className = "select-card";
+    card.setAttribute("data-value", priority);
+    const isSelected = onboardingData.monitoringPriorities.includes(priority);
+    if (isSelected) card.classList.add("selected");
+
+    card.innerHTML = `
+      <span>${priority}</span>
+      <span class="card-check">✓</span>
+    `;
+    card.onclick = () => toggleMonitoringPriority(priority);
+    container.appendChild(card);
+  });
+}
+
+function toggleMonitoringPriority(priority) {
+  if (priority === "All important changes") {
+    if (onboardingData.monitoringPriorities.includes("All important changes")) {
+      onboardingData.monitoringPriorities = [];
+    } else {
+      onboardingData.monitoringPriorities = [...MONITORING_PRIORITIES];
+    }
+  } else {
+    const idx = onboardingData.monitoringPriorities.indexOf(priority);
+    if (idx >= 0) {
+      onboardingData.monitoringPriorities.splice(idx, 1);
+      const allIdx = onboardingData.monitoringPriorities.indexOf("All important changes");
+      if (allIdx >= 0) onboardingData.monitoringPriorities.splice(allIdx, 1);
+    } else {
+      onboardingData.monitoringPriorities.push(priority);
+      const nonAll = MONITORING_PRIORITIES.filter((p) => p !== "All important changes");
+      const hasAllIndividual = nonAll.every((p) => onboardingData.monitoringPriorities.includes(p));
+      if (hasAllIndividual && !onboardingData.monitoringPriorities.includes("All important changes")) {
+        onboardingData.monitoringPriorities.push("All important changes");
       }
     }
-  } catch (err) {
-    hideOnboardTypingIndicator();
-    toast("Failed to draft profile summary: " + err.message);
+  }
+
+  document.querySelectorAll("#priority-options .select-card").forEach((c) => {
+    const val = c.getAttribute("data-value");
+    c.classList.toggle("selected", onboardingData.monitoringPriorities.includes(val));
+  });
+
+  updatePriorityContinueButton();
+}
+
+function updatePriorityContinueButton() {
+  const btn = document.getElementById("btn-step-4");
+  if (btn) {
+    btn.disabled = onboardingData.monitoringPriorities.length === 0;
   }
 }
 
-function escapeJS(str) {
-  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+function skipStep5() {
+  onboardingData.importantPages = [];
+  const el = document.getElementById("ob-important-pages");
+  if (el) el.value = "";
+  goToOnboardStep(6);
 }
 
-async function confirmConversationalProfile(summaryText) {
-  const form = {};
-  form.name = localStorage.getItem(STORAGE.email)?.split("@")[0] || "User";
-  
-  // Parse fields
-  const professionMatch = summaryText.match(/Who they are:\s*([^\n]+)/i) || summaryText.match(/Role:\s*([^\n]+)/i);
-  form.profession = professionMatch ? professionMatch[1].trim() : "Specialist";
-  
-  const goalsMatch = summaryText.match(/Preferred content style:\s*([^\n]+)/i) || summaryText.match(/Goals:\s*([^\n]+)/i) || summaryText.match(/Topics & sources to emphasize:\s*([^\n]+)/i);
-  form.goals = goalsMatch ? goalsMatch[1].trim() : "Balanced briefs";
-  
-  const topicsMatch = summaryText.match(/Topics to cover:\s*([^\n]+)/i) || summaryText.match(/Topics:\s*([^\n]+)/i) || summaryText.match(/Focus:\s*([^\n]+)/i);
-  form.topics = topicsMatch ? topicsMatch[1].trim() : "Technology, AI, Startups";
-  
-  const avoidMatch = summaryText.match(/What to avoid:\s*([^\n]+)/i) || summaryText.match(/Avoid:\s*([^\n]+)/i);
-  form.avoid = avoidMatch ? avoidMatch[1].trim() : "Celebrity news, generic blogs";
-  
-  const customSourcesMatch = summaryText.match(/Sources:\s*([^\n]+)/i) || summaryText.match(/Custom sources:\s*([^\n]+)/i);
-  form.customSources = customSourcesMatch ? customSourcesMatch[1].trim() : "";
-  
-  form.language = "English";
-  form.country = "United States";
-  form.newsScope = "Mixed";
-  form.digestLength = "Standard";
-  form.digestTime = "08:00";
-  form.timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  form.tone = "balanced";
+function nextOnboardStep(targetStep) {
+  if (targetStep === 2) {
+    const input = document.getElementById("ob-website-url");
+    const val = input ? input.value.trim() : "";
+    if (!isValidUrlOrDomain(val)) {
+      const err = document.getElementById("ob-url-error");
+      if (err) err.style.display = "block";
+      if (input) input.focus();
+      return;
+    }
+    let cleanUrl = val.replace(/^https?:\/\//i, "").trim();
+    cleanUrl = cleanUrl.replace(/\/+$/, "");
+    onboardingData.websiteUrl = cleanUrl;
+  } else if (targetStep === 3) {
+    if (!onboardingData.websiteType) {
+      toast("Please select a website type");
+      return;
+    }
+  } else if (targetStep === 4) {
+    if (!onboardingData.websitePurpose) {
+      toast("Please select the main job of this website");
+      return;
+    }
+  } else if (targetStep === 5) {
+    if (onboardingData.monitoringPriorities.length === 0) {
+      onboardingData.monitoringPriorities = ["All important changes"];
+      renderPriorityOptions();
+    }
+  } else if (targetStep === 6) {
+    const input = document.getElementById("ob-important-pages");
+    if (input && input.value.trim()) {
+      onboardingData.importantPages = input.value
+        .split(/[\n,]/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+    } else {
+      onboardingData.importantPages = [];
+    }
+  }
+
+  goToOnboardStep(targetStep);
+}
+
+function prevOnboardStep(targetStep) {
+  goToOnboardStep(targetStep);
+}
+
+function renderConfirmationStep() {
+  const siteEl = document.getElementById("confirm-website");
+  const typeEl = document.getElementById("confirm-type");
+  const purposeEl = document.getElementById("confirm-purpose");
+  const prioEl = document.getElementById("confirm-priorities");
+  const pagesEl = document.getElementById("confirm-pages");
+
+  if (siteEl) siteEl.textContent = onboardingData.websiteUrl || "—";
+  if (typeEl) typeEl.textContent = onboardingData.websiteType || "—";
+  if (purposeEl) purposeEl.textContent = onboardingData.websitePurpose || "—";
+
+  if (prioEl) {
+    prioEl.innerHTML = "";
+    const list = onboardingData.monitoringPriorities.length > 0
+      ? onboardingData.monitoringPriorities
+      : ["All important changes"];
+    list.forEach((p) => {
+      const pill = document.createElement("span");
+      pill.className = "meta-pill";
+      pill.textContent = p;
+      prioEl.appendChild(pill);
+    });
+  }
+
+  if (pagesEl) {
+    if (onboardingData.importantPages.length > 0) {
+      pagesEl.textContent = onboardingData.importantPages.join(", ");
+    } else {
+      pagesEl.textContent = "None specified";
+    }
+  }
+}
+
+function buildWebsiteSummaryText(data) {
+  const lines = [
+    `Website: ${data.websiteUrl}`,
+    `Type: ${data.websiteType}`,
+    `Main goal: ${data.websitePurpose}`,
+    `Watching for: ${(data.monitoringPriorities || []).join(", ") || "All important changes"}`,
+  ];
+  if (data.importantPages && data.importantPages.length > 0) {
+    lines.push(`Important pages: ${data.importantPages.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+async function submitWebsiteOnboarding() {
+  const btn = document.getElementById("btn-confirm-onboard");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Setting up Watchdog…";
+  }
+
+  const summaryText = buildWebsiteSummaryText(onboardingData);
+  const lockUntil = new Date();
+  lockUntil.setDate(lockUntil.getDate() + 7);
+
+  const form = {
+    name: localStorage.getItem(STORAGE.email)?.split("@")[0] || "User",
+    websiteUrl: onboardingData.websiteUrl,
+    websiteType: onboardingData.websiteType,
+    websitePurpose: onboardingData.websitePurpose,
+    monitoringPriorities: onboardingData.monitoringPriorities,
+    importantPages: onboardingData.importantPages,
+    summary: summaryText,
+    profession: `${onboardingData.websiteType} Owner`,
+    goals: onboardingData.websitePurpose,
+    topics: (onboardingData.monitoringPriorities || []).join(", ") || "Website performance, SEO, search traffic",
+    avoid: "Broken tracking, vanity metrics without impact",
+    customSources: onboardingData.websiteUrl,
+    language: "English",
+    country: "United States",
+    newsScope: "Website Performance",
+    digestLength: "Standard",
+    tone: "concise",
+    digestTime: "08:00",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  };
 
   localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
   localStorage.setItem(STORAGE.profile, summaryText);
-
-  const lockUntil = new Date();
-  lockUntil.setDate(lockUntil.getDate() + 7);
   localStorage.setItem(STORAGE.lock, lockUntil.toISOString());
 
   const savedEmail = localStorage.getItem(STORAGE.email) || "";
@@ -526,6 +704,11 @@ async function confirmConversationalProfile(summaryText) {
           plan: localStorage.getItem(STORAGE.plan) || "starter",
           lockedUntil: lockUntil.toISOString(),
           profile: {
+            websiteUrl: form.websiteUrl,
+            websiteType: form.websiteType,
+            websitePurpose: form.websitePurpose,
+            monitoringPriorities: form.monitoringPriorities,
+            importantPages: form.importantPages,
             summary: summaryText,
             profession: form.profession,
             goals: form.goals,
@@ -543,7 +726,7 @@ async function confirmConversationalProfile(summaryText) {
         }),
       });
 
-      // Send welcome email
+      // Send welcome email if enabled
       fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -560,6 +743,12 @@ async function confirmConversationalProfile(summaryText) {
     }
   }
 
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "Continue to Watchdog →";
+  }
+
+  toast("Your Watchdog profile is ready");
   showDashboard(lockUntil, summaryText);
   generateDashboardDigest(true);
 }
@@ -704,28 +893,49 @@ function showDashboard(lockDate, profileText, email) {
   const name = form.name ? `, ${form.name.split(" ")[0]}` : "";
   document.getElementById("dash-greeting").textContent = greet + name;
 
-  document.getElementById("dp-profession").textContent = form.profession || "—";
-  document.getElementById("dp-goal").textContent = form.goals || "—";
-  document.getElementById("dp-scope").textContent = form.newsScope || "Mixed";
-  document.getElementById("dp-avoid").textContent = form.avoid || "—";
-  document.getElementById("dp-length").textContent = form.digestLength || "Standard";
-  document.getElementById("dp-region").textContent =
-    [form.language, form.country].filter(Boolean).join(" · ") || "—";
-  document.getElementById("dp-sources").textContent = form.customSources || "Default curated feeds";
+  // Website details
+  const dpWebsite = document.getElementById("dp-website");
+  if (dpWebsite) dpWebsite.textContent = form.websiteUrl || form.customSources || "—";
+  const dpType = document.getElementById("dp-type");
+  if (dpType) dpType.textContent = form.websiteType || form.profession || "—";
+  const dpGoal = document.getElementById("dp-goal");
+  if (dpGoal) dpGoal.textContent = form.websitePurpose || form.goals || "—";
+
+  // Legacy/fallback elements
+  const dpProf = document.getElementById("dp-profession");
+  if (dpProf) dpProf.textContent = form.profession || form.websiteType || "—";
+  const dpScope = document.getElementById("dp-scope");
+  if (dpScope) dpScope.textContent = form.newsScope || "Website Performance";
+  const dpAvoid = document.getElementById("dp-avoid");
+  if (dpAvoid) dpAvoid.textContent = form.avoid || "—";
+  const dpLength = document.getElementById("dp-length");
+  if (dpLength) dpLength.textContent = form.digestLength || "Standard";
+  const dpRegion = document.getElementById("dp-region");
+  if (dpRegion) dpRegion.textContent = [form.language, form.country].filter(Boolean).join(" · ") || "—";
+  const dpSources = document.getElementById("dp-sources");
+  if (dpSources) dpSources.textContent = form.customSources || form.websiteUrl || "Default curated feeds";
+
+  const pagesEl = document.getElementById("dp-pages");
+  if (pagesEl) {
+    const pages = Array.isArray(form.importantPages) && form.importantPages.length > 0
+      ? form.importantPages.join(", ")
+      : (typeof form.importantPages === "string" && form.importantPages ? form.importantPages : "None specified");
+    pagesEl.textContent = pages;
+  }
 
   const tagsEl = document.getElementById("dp-tags");
-  tagsEl.innerHTML = "";
-  (form.topics || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .slice(0, 8)
-    .forEach((t) => {
+  if (tagsEl) {
+    tagsEl.innerHTML = "";
+    const priorityList = (Array.isArray(form.monitoringPriorities) && form.monitoringPriorities.length > 0)
+      ? form.monitoringPriorities
+      : (form.topics || "Search visibility, Traffic changes").split(",").map((t) => t.trim()).filter(Boolean);
+    priorityList.slice(0, 8).forEach((t) => {
       const tag = document.createElement("span");
       tag.className = "profile-tag";
       tag.textContent = t;
       tagsEl.appendChild(tag);
     });
+  }
 
   syncProfilePanels();
   startLockCountdown(lockDate);
@@ -735,9 +945,30 @@ function showDashboard(lockDate, profileText, email) {
 
 function syncProfilePanels() {
   const form = getSavedForm();
+  
+  const dpWebsite2 = document.getElementById("dp-website-2");
+  if (dpWebsite2) dpWebsite2.textContent = form.websiteUrl || form.customSources || "—";
+  const dpType2 = document.getElementById("dp-type-2");
+  if (dpType2) dpType2.textContent = form.websiteType || form.profession || "—";
+  const dpGoal2 = document.getElementById("dp-goal-2");
+  if (dpGoal2) dpGoal2.textContent = form.websitePurpose || form.goals || "—";
+
+  const pagesEl2 = document.getElementById("dp-pages-2");
+  if (pagesEl2) {
+    const pages = Array.isArray(form.importantPages) && form.importantPages.length > 0
+      ? form.importantPages.join(", ")
+      : (typeof form.importantPages === "string" && form.importantPages ? form.importantPages : "None specified");
+    pagesEl2.textContent = pages;
+  }
+
+  const summaryEl2 = document.getElementById("dp-summary-2");
+  if (summaryEl2) {
+    summaryEl2.textContent = localStorage.getItem(STORAGE.profile) || form.summary || "—";
+  }
+
   const pairs = [
-    ["dp-profession", "dp-profession-2", form.profession],
-    ["dp-goal", "dp-goal-2", form.goals],
+    ["dp-profession", "dp-profession-2", form.profession || form.websiteType],
+    ["dp-goal", "dp-goal-2", form.goals || form.websitePurpose],
     ["dp-scope", "dp-scope-2", form.newsScope],
     ["dp-length", "dp-length-2", form.digestLength],
     ["dp-avoid", "dp-avoid-2", form.avoid],
@@ -1203,9 +1434,18 @@ window.closeAuthModal = closeAuthModal;
 window.switchAuthTab = switchAuthTab;
 window.handleSignup = handleSignup;
 window.handleLogin = handleLogin;
-window.sendOnboardChatMessage = sendOnboardChatMessage;
-window.handleOnboardChatKey = handleOnboardChatKey;
-window.confirmConversationalProfile = confirmConversationalProfile;
+window.showOnboarding = showOnboarding;
+window.validateStep1 = validateStep1;
+window.handleStep1Key = handleStep1Key;
+window.nextOnboardStep = nextOnboardStep;
+window.prevOnboardStep = prevOnboardStep;
+window.selectWebsiteType = selectWebsiteType;
+window.handleTypeOtherInput = handleTypeOtherInput;
+window.selectWebsitePurpose = selectWebsitePurpose;
+window.handlePurposeOtherInput = handlePurposeOtherInput;
+window.toggleMonitoringPriority = toggleMonitoringPriority;
+window.skipStep5 = skipStep5;
+window.submitWebsiteOnboarding = submitWebsiteOnboarding;
 window.generateDashboardDigest = generateDashboardDigest;
 window.sendDigestEmail = sendDigestEmail;
 window.dashNav = dashNav;

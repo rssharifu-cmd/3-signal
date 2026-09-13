@@ -321,25 +321,137 @@
     <button class="btn btn-ghost btn-sm" onclick="resetAll()">Reset</button>
   </header>
 
-  <!-- Onboarding conversational AI chat -->
+  <!-- Structured Website Watchdog Onboarding -->
   <div id="onboarding-view" class="onboard-wrap hidden">
-    <div class="chat-layout" style="height: calc(100vh - 56px); display: flex; flex-direction: column;">
-      <!-- Conversational Progress Bar -->
-      <div id="onboard-progress-bar-container" style="background: var(--surface-1); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;">
-        <span style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">Modeling your digest profile</span>
-        <div style="width: 120px; background: var(--surface-3); height: 6px; border-radius: 3px; overflow: hidden; position: relative;">
-          <div id="conversational-progress-fill" style="position: absolute; left: 0; top: 0; bottom: 0; width: 20%; background: var(--primary); transition: width 0.4s ease;"></div>
+    <div class="onboard-container">
+      <div class="onboard-progress-top">
+        <div class="progress-track">
+          <div class="progress-fill" id="onboard-progress-bar" style="width: 20%;"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+          <span class="progress-label" id="onboard-step-indicator">Step 1 of 5</span>
+          <span style="font-size:12px;color:var(--dim);font-weight:600;letter-spacing:0.02em;">Website Watchdog Setup</span>
         </div>
       </div>
-      <div id="onboard-chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto;">
-        <div id="onboard-chat-inner" class="chat-messages-inner" style="max-width: 680px; margin: 0 auto; width: 100%;">
-          <!-- Chat messages dynamically rendered here -->
+
+      <div class="onboard-panel">
+        <!-- Step 1: Website URL -->
+        <div class="onboard-step active" id="onboard-step-1">
+          <h2>What website do you want Watchdog to monitor?</h2>
+          <p class="step-lead">Enter your website URL or domain to create your monitoring profile.</p>
+          <div style="margin-top:16px;">
+            <label for="ob-website-url" style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:6px;">Website URL</label>
+            <input type="text" id="ob-website-url" placeholder="https://example.com" class="other-input" style="margin-top:0;" oninput="validateStep1()" onkeydown="handleStep1Key(event)" />
+            <div id="ob-url-error" style="color:#DC2626;font-size:12px;margin-top:6px;display:none;">Please enter a valid website URL or domain (e.g. example.com or https://example.com).</div>
+          </div>
+          <div class="onboard-actions">
+            <button class="btn btn-primary" id="btn-step-1" onclick="nextOnboardStep(2)">Continue →</button>
+          </div>
         </div>
-      </div>
-      <div class="chat-input-bar">
-        <div class="chat-input-inner">
-          <textarea id="onboard-chat-input" placeholder="Type your response... (Press Enter to send)" rows="1" onkeydown="handleOnboardChatKey(event)"></textarea>
-          <button class="btn btn-primary" id="btn-onboard-chat-send" onclick="sendOnboardChatMessage()" style="border-radius: 24px; padding: 12px 20px;">Send</button>
+
+        <!-- Step 2: Website Type -->
+        <div class="onboard-step" id="onboard-step-2">
+          <h2>What type of website is this?</h2>
+          <p class="step-lead">Select the category that best describes this website.</p>
+          <div class="select-grid" id="type-options">
+            <!-- Rendered by JS -->
+          </div>
+          <div id="type-other-wrap" style="display:none;margin-top:12px;">
+            <input type="text" id="ob-type-other" placeholder="Describe your website type..." class="other-input" oninput="handleTypeOtherInput()" />
+          </div>
+          <div class="onboard-actions">
+            <button class="btn btn-secondary" onclick="prevOnboardStep(1)">← Back</button>
+            <button class="btn btn-primary" id="btn-step-2" onclick="nextOnboardStep(3)" disabled>Continue →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Website Purpose -->
+        <div class="onboard-step" id="onboard-step-3">
+          <h2>What is the main job of this website?</h2>
+          <p class="step-lead">Choose the primary outcome this website exists to achieve.</p>
+          <div class="select-grid" id="purpose-options">
+            <!-- Rendered by JS -->
+          </div>
+          <div id="purpose-other-wrap" style="display:none;margin-top:12px;">
+            <input type="text" id="ob-purpose-other" placeholder="Describe main job..." class="other-input" oninput="handlePurposeOtherInput()" />
+          </div>
+          <div class="onboard-actions">
+            <button class="btn btn-secondary" onclick="prevOnboardStep(2)">← Back</button>
+            <button class="btn btn-primary" id="btn-step-3" onclick="nextOnboardStep(4)" disabled>Continue →</button>
+          </div>
+        </div>
+
+        <!-- Step 4: Monitoring Priorities -->
+        <div class="onboard-step" id="onboard-step-4">
+          <h2>What should Watchdog pay the most attention to?</h2>
+          <p class="step-lead">Select all signals that matter most for this website. You can select multiple.</p>
+          <div class="select-grid" id="priority-options">
+            <!-- Rendered by JS -->
+          </div>
+          <div class="onboard-actions">
+            <button class="btn btn-secondary" onclick="prevOnboardStep(3)">← Back</button>
+            <button class="btn btn-primary" id="btn-step-4" onclick="nextOnboardStep(5)">Continue →</button>
+          </div>
+        </div>
+
+        <!-- Step 5: Important Pages -->
+        <div class="onboard-step" id="onboard-step-5">
+          <h2>Does your website have pages that are especially important?</h2>
+          <p class="step-lead">Optional. Enter page paths or URLs you want watched closely (e.g. high-converting landing pages, pricing, contact).</p>
+          <div style="margin-top:16px;">
+            <label for="ob-important-pages" style="display:block;font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--muted);margin-bottom:6px;">Important page paths or URLs <span class="label-optional">(Optional)</span></label>
+            <textarea id="ob-important-pages" rows="4" placeholder="/pricing&#10;/products&#10;/services&#10;/contact&#10;/signup" class="other-input" style="margin-top:0;resize:vertical;font-family:monospace;font-size:13px;line-height:1.6;"></textarea>
+            <div class="field-hint">Examples: /pricing, /products, /services, /contact, /signup. Enter one per line or separated by commas.</div>
+          </div>
+          <div class="onboard-actions">
+            <button class="btn btn-secondary" onclick="prevOnboardStep(4)">← Back</button>
+            <button class="btn btn-ghost" onclick="skipStep5()">Skip this step</button>
+            <button class="btn btn-primary" id="btn-step-5" onclick="nextOnboardStep(6)">Review Setup →</button>
+          </div>
+        </div>
+
+        <!-- Final Step: Confirmation Screen -->
+        <div class="onboard-step" id="onboard-step-6">
+          <div style="display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);border:1px solid #A7F3D0;color:var(--green);padding:4px 12px;border-radius:100px;font-size:12px;font-weight:700;margin-bottom:14px;">
+            ✓ Profile Ready
+          </div>
+          <h2>Your Watchdog is set up</h2>
+          <p class="step-lead" style="margin-bottom:18px;">Review your monitoring profile before continuing to your dashboard.</p>
+          
+          <div class="profile-summary-card" style="margin-bottom:20px;">
+            <div class="profile-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+              <span style="color:var(--muted);font-size:13px;font-weight:500;">Website</span>
+              <strong id="confirm-website" style="font-size:14px;color:var(--text);word-break:break-all;">—</strong>
+            </div>
+            <div class="profile-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+              <span style="color:var(--muted);font-size:13px;font-weight:500;">Type</span>
+              <span id="confirm-type" style="font-size:14px;color:var(--text);font-weight:600;">—</span>
+            </div>
+            <div class="profile-row" style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);">
+              <span style="color:var(--muted);font-size:13px;font-weight:500;">Main goal</span>
+              <span id="confirm-purpose" style="font-size:14px;color:var(--text);font-weight:600;">—</span>
+            </div>
+            <div class="profile-row" style="display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--border);">
+              <span style="color:var(--muted);font-size:13px;font-weight:500;">Watching for</span>
+              <div id="confirm-priorities" style="display:flex;flex-wrap:wrap;gap:6px;">—</div>
+            </div>
+            <div class="profile-row" id="confirm-pages-row" style="display:flex;flex-direction:column;gap:6px;padding:10px 0;">
+              <span style="color:var(--muted);font-size:13px;font-weight:500;">Key pages</span>
+              <div id="confirm-pages" style="font-size:13px;color:var(--text);font-family:monospace;">None specified</div>
+            </div>
+          </div>
+
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:24px;display:flex;gap:12px;align-items:flex-start;">
+            <span style="font-size:18px;line-height:1.2;">ℹ️</span>
+            <p style="font-size:13px;color:var(--muted);line-height:1.55;margin:0;">
+              <strong>Your website profile is ready.</strong> Connect your data sources when available to start monitoring.
+            </p>
+          </div>
+
+          <div class="onboard-actions">
+            <button class="btn btn-secondary" onclick="prevOnboardStep(5)">← Edit</button>
+            <button class="btn btn-primary" id="btn-confirm-onboard" onclick="submitWebsiteOnboarding()">Continue to Watchdog →</button>
+          </div>
         </div>
       </div>
     </div>
@@ -373,17 +485,17 @@
             </div>
           </div>
           <div class="dash-card">
-            <div class="dash-card-head"><h3>Quick profile</h3></div>
-            <div class="profile-row"><span class="label">Role</span><span id="dp-profession">—</span></div>
-            <div class="profile-row"><span class="label">Goal</span><span id="dp-goal">—</span></div>
-            <div class="profile-row"><span class="label">Topics</span><div class="profile-tags" id="dp-tags"></div></div>
-            <div class="profile-row"><span class="label">Scope</span><span id="dp-scope">—</span></div>
+            <div class="dash-card-head"><h3>Website profile</h3></div>
+            <div class="profile-row"><span class="label">Website</span><span id="dp-website" style="font-weight:600;color:var(--text);">—</span></div>
+            <div class="profile-row"><span class="label">Type</span><span id="dp-type">—</span></div>
+            <div class="profile-row"><span class="label">Main Goal</span><span id="dp-goal">—</span></div>
+            <div class="profile-row"><span class="label">Watching</span><div class="profile-tags" id="dp-tags"></div></div>
           </div>
           <div class="dash-card">
-            <div class="dash-card-head"><h3>Filters</h3></div>
-            <div class="profile-row"><span class="label">Avoid</span><span id="dp-avoid">—</span></div>
-            <div class="profile-row"><span class="label">Length</span><span id="dp-length">—</span></div>
-            <div class="profile-row"><span class="label">Region</span><span id="dp-region">—</span></div>
+            <div class="dash-card-head"><h3>Monitoring scope</h3></div>
+            <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages">—</span></div>
+            <div class="profile-row"><span class="label">Status</span><span id="dp-status" style="color:var(--green);font-weight:600;">Profile Ready</span></div>
+            <div class="profile-row"><span class="label">Integrations</span><span id="dp-integrations" style="color:var(--amber-text);font-weight:600;">Connect when available</span></div>
           </div>
         </div>
       </div>
@@ -403,19 +515,16 @@
       <!-- Profile panel -->
       <div class="dash-panel hidden" id="panel-profile">
         <div class="dash-header">
-          <h1>Your digest profile</h1>
-          <p>Your intelligence profile. Reset anytime to start fresh.</p>
+          <h1>Your website profile</h1>
+          <p>Your monitoring profile configuration. Reset anytime to start fresh.</p>
         </div>
         <div class="dash-card">
-          <div class="profile-row"><span class="label">Role</span><span id="dp-profession-2">—</span></div>
-          <div class="profile-row"><span class="label">Goal</span><span id="dp-goal-2">—</span></div>
-          <div class="profile-row"><span class="label">Topics</span><div class="profile-tags" id="dp-tags-2"></div></div>
-          <div class="profile-row"><span class="label">Language</span><span id="dp-language">—</span></div>
-          <div class="profile-row"><span class="label">Country</span><span id="dp-country">—</span></div>
-          <div class="profile-row"><span class="label">Scope</span><span id="dp-scope-2">—</span></div>
-          <div class="profile-row"><span class="label">Length</span><span id="dp-length-2">—</span></div>
-          <div class="profile-row"><span class="label">Sources</span><span id="dp-sources">—</span></div>
-          <div class="profile-row"><span class="label">Avoid</span><span id="dp-avoid-2">—</span></div>
+          <div class="profile-row"><span class="label">Website</span><span id="dp-website-2" style="font-weight:600;color:var(--text);">—</span></div>
+          <div class="profile-row"><span class="label">Type</span><span id="dp-type-2">—</span></div>
+          <div class="profile-row"><span class="label">Main Goal</span><span id="dp-goal-2">—</span></div>
+          <div class="profile-row"><span class="label">Watching</span><div class="profile-tags" id="dp-tags-2"></div></div>
+          <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages-2">—</span></div>
+          <div class="profile-row"><span class="label">Summary</span><span id="dp-summary-2" style="font-size:13px;line-height:1.5;color:var(--muted);white-space:pre-wrap;">—</span></div>
         </div>
       </div>
     </main>
