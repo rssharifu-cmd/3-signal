@@ -7,6 +7,10 @@
     { "source": "/api/news", "destination": "/api/news.js" },
     { "source": "/api/send", "destination": "/api/send.js" },
     { "source": "/api/user", "destination": "/api/user.js" },
+    { "source": "/privacy", "destination": "/privacy.html" },
+    { "source": "/privacy/", "destination": "/privacy.html" },
+    { "source": "/terms", "destination": "/terms.html" },
+    { "source": "/terms/", "destination": "/terms.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -41,6 +41,15 @@ app.all("/api/:route", async (req, res) => {
   }
 });
 
+// Public legal pages
+app.get(["/privacy", "/privacy/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "privacy.html"));
+});
+
+app.get(["/terms", "/terms/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "terms.html"));
+});
+
 // Serve root-level files like favicon or specific assets
 app.use(express.static(path.join(__dirname)));
 
