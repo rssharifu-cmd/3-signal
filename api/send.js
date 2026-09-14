@@ -29,12 +29,27 @@ function parseBody(req) {
 
 function welcomeHtml({ name, profileSummary, unlockDate, email }) {
   const firstName = name ? name.split(" ")[0] : "there";
+  const hasUnlockDate = Boolean(unlockDate && unlockDate.trim());
+
+  const subText = hasUnlockDate
+    ? "Your profile is confirmed and locked. Your first digest lands in your inbox tomorrow morning."
+    : "Your website monitoring profile is configured and ready. Connect your data sources when available to start monitoring.";
+
+  const statusNote = hasUnlockDate
+    ? `<p class="lock-note">
+        Your profile is locked until <strong>${unlockDate}</strong> so Sharflow can tune your digest over the first week.
+        After that you can update it anytime from your dashboard.
+      </p>`
+    : `<p class="lock-note">
+        Your Watchdog profile is saved. Actual website monitoring will begin after data sources are connected. You can review or adjust your profile anytime from your dashboard.
+      </p>`;
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Welcome to Sharflow</title>
+<title>${hasUnlockDate ? "Welcome to Sharflow" : "Welcome to Sharflow — Watchdog Profile Ready"}</title>
 <style>
   body { margin:0; padding:0; background:#FAFAF8; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color:#1A1A18; -webkit-font-smoothing:antialiased; }
   .wrap { max-width:580px; margin:0 auto; background:#fff; border:1px solid #E8E6E0; border-radius:12px; overflow:hidden; }
@@ -63,19 +78,16 @@ function welcomeHtml({ name, profileSummary, unlockDate, email }) {
     </div>
     <div class="body">
       <div class="greeting">Welcome, ${firstName}!</div>
-      <p class="sub">Your profile is confirmed and locked. Your first digest lands in your inbox tomorrow morning.</p>
+      <p class="sub">${subText}</p>
 
       <div class="profile-box">
-        <div class="profile-box-label">Your profile summary</div>
+        <div class="profile-box-label">${hasUnlockDate ? "Your profile summary" : "Your Watchdog profile"}</div>
         <p>${profileSummary ? profileSummary.replace(/</g, "&lt;").replace(/>/g, "&gt;") : "Profile saved successfully."}</p>
       </div>
 
       <hr class="divider"/>
 
-      <p class="lock-note">
-        Your profile is locked until <strong>${unlockDate}</strong> so Sharflow can tune your digest over the first week.
-        After that you can update it anytime from your dashboard.
-      </p>
+      ${statusNote}
 
       <a class="cta" href="https://sharflow.com">Open your dashboard →</a>
     </div>
@@ -173,7 +185,9 @@ async function handler(req, res) {
       const profileSummary = body.profileSummary || "";
       const unlockDate = body.unlockDate || "";
 
-      subject = `Welcome to Sharflow${name ? `, ${name.split(" ")[0]}` : ""} — your digest starts tomorrow`;
+      subject = unlockDate
+        ? `Welcome to Sharflow${name ? `, ${name.split(" ")[0]}` : ""} — your digest starts tomorrow`
+        : `Welcome to Sharflow${name ? `, ${name.split(" ")[0]}` : ""} — your Watchdog profile is ready`;
       html = welcomeHtml({ name, profileSummary, unlockDate, email: toEmail });
 
     // ── DIGEST ───────────────────────────────────────────────────────────────

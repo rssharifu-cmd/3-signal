@@ -687,9 +687,6 @@ async function submitWebsiteOnboarding() {
   }
 
   const summaryText = buildWebsiteSummaryText(onboardingData);
-  const lockUntil = new Date();
-  lockUntil.setDate(lockUntil.getDate() + 7);
-
   const existingForm = getSavedForm();
   const userFullName = getUserName();
 
@@ -715,12 +712,11 @@ async function submitWebsiteOnboarding() {
     tone: existingForm.tone || "concise",
     digestTime: existingForm.digestTime || "08:00",
     timezone: existingForm.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
-    lockedUntil: existingForm.lockedUntil || lockUntil.toISOString(),
+    lockedUntil: existingForm.lockedUntil || null,
   };
 
   localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
   localStorage.setItem(STORAGE.profile, summaryText);
-  localStorage.setItem(STORAGE.lock, lockUntil.toISOString());
 
   const savedEmail = localStorage.getItem(STORAGE.email) || "";
   const token = localStorage.getItem(STORAGE.token) || "";
@@ -733,7 +729,6 @@ async function submitWebsiteOnboarding() {
         body: JSON.stringify({
           name: form.name,
           plan: localStorage.getItem(STORAGE.plan) || "starter",
-          lockedUntil: lockUntil.toISOString(),
           profile: {
             profileMode: "website-watchdog-onboarding",
             websiteUrl: form.websiteUrl,
@@ -759,7 +754,7 @@ async function submitWebsiteOnboarding() {
         }),
       });
 
-      // Send welcome email if enabled
+      // Send welcome email if enabled (without unlock date or trial scheduling)
       fetch("/api/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -768,7 +763,6 @@ async function submitWebsiteOnboarding() {
           email: savedEmail,
           name: form.name,
           profileSummary: summaryText,
-          unlockDate: lockUntil.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         }),
       }).catch((e) => console.warn("Welcome email send error:", e));
     } catch (err) {
@@ -782,7 +776,8 @@ async function submitWebsiteOnboarding() {
   }
 
   toast("Your Watchdog profile is ready. Connect your data sources when available to start monitoring.");
-  showDashboard(lockUntil, summaryText);
+  const activeLock = existingForm.lockedUntil ? new Date(existingForm.lockedUntil) : null;
+  showDashboard(activeLock, summaryText);
 }
 
 function digestLengthToTone(length) {
@@ -1045,6 +1040,7 @@ function syncDigestPanels() {
 function startLockCountdown(lockDate) {
   if (lockCountdownTimer) clearInterval(lockCountdownTimer);
   const el = document.getElementById("lock-countdown");
+  if (!el || !lockDate) return;
   const pill = el?.closest(".meta-pill");
 
   function tick() {
