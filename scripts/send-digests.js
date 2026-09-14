@@ -661,7 +661,7 @@ async function sendDigestEmail(user, digestContent) {
     </div>
     <div style="padding:18px 28px;text-align:center;font-size:12px;color:#9E9E96;border-top:1px solid #E8E6E0;">
       <p>You're receiving this because you subscribed to Sharflow.</p>
-      <p style="margin-top:6px;"><a href="https://sharflow.com/unsubscribe" style="color:#9E9E96;text-decoration:none;">Unsubscribe</a> · <a href="#" style="color:#9E9E96;text-decoration:none;">Update preferences</a></p>
+      <p style="margin-top:6px;"><a href="https://sharflow.online/unsubscribe" style="color:#9E9E96;text-decoration:none;">Unsubscribe</a> · <a href="#" style="color:#9E9E96;text-decoration:none;">Update preferences</a></p>
     </div>
   </div>
 </div></body></html>`;
@@ -669,7 +669,7 @@ async function sendDigestEmail(user, digestContent) {
   const res = await withTimeout(fetch(RESEND_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Sharflow — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.com/unsubscribe>" } }),
+    body: JSON.stringify({ from: fromEmail, to: [user.email], subject: `Your Sharflow — ${date}`, html, headers: { "List-Unsubscribe": "<https://sharflow.online/unsubscribe>" } }),
   }), TIMEOUT_MS);
   const data = await res.json();
   if (!res.ok) throw new Error(data?.message || "Resend error");

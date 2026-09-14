@@ -8,6 +8,8 @@ function cors(req, res) {
     "http://localhost:5173",
     "http://127.0.0.1:5500",
     "http://127.0.0.1:3000",
+    "https://sharflow.online",
+    "https://www.sharflow.online",
     "https://sharflow.com",
     "https://www.sharflow.com"
   ];
@@ -16,7 +18,7 @@ function cors(req, res) {
   if (allowedOrigins.includes(origin) || origin.endsWith(".vercel.app") || !origin) {
     res.setHeader("Access-Control-Allow-Origin", origin || "*");
   } else {
-    res.setHeader("Access-Control-Allow-Origin", "https://sharflow.com");
+    res.setHeader("Access-Control-Allow-Origin", "https://sharflow.online");
   }
   
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");

@@ -77,11 +77,11 @@ function welcomeHtml({ name, profileSummary, unlockDate, email }) {
         After that you can update it anytime from your dashboard.
       </p>
 
-      <a class="cta" href="https://sharflow.com">Open your dashboard →</a>
+      <a class="cta" href="https://sharflow.online">Open your dashboard →</a>
     </div>
     <div class="footer">
       <p>You're receiving this because you signed up for Sharflow with ${email}</p>
-      <p style="margin-top:6px;"><a href="#">Unsubscribe</a> · <a href="#">Privacy</a></p>
+      <p style="margin-top:6px;"><a href="https://sharflow.online/privacy">Privacy Policy</a> · <a href="https://sharflow.online/terms">Terms of Service</a></p>
     </div>
   </div>
 </div>
