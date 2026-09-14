@@ -7,13 +7,16 @@
  *
  * ARCHITECTURAL SAFETY:
  * - Minimum required read-only scopes.
+ * - Exact validated origin postMessage (no wildcard '*').
+ * - Open redirect prevention on all callback return destinations.
+ * - Target-specific Google authorization status (never falsely marks other services).
  * - Refresh tokens are encrypted with AES-256-GCM before database storage.
  * - Never returns tokens or client secrets to frontend or logs.
  */
 
 const jwt = require("jsonwebtoken");
 const { getDb } = require("./db");
-const { cors, extractEmail } = require("./authMiddleware");
+const { cors, extractEmail, isTrustedOrigin, getValidatedOrigin, getSafeReturnUrl, PRODUCTION_ORIGIN } = require("./authMiddleware");
 const { encryptToken, hasEncryptionKey } = require("./cryptoUtils");
 
 const jwtSecret = (process.env.JWT_SECRET || "").trim();
@@ -22,46 +25,47 @@ const jwtSecret = (process.env.JWT_SECRET || "").trim();
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
-const GOOGLE_SCOPES = [
-  "https://www.googleapis.com/auth/webmasters.readonly",
-  "https://www.googleapis.com/auth/analytics.readonly",
-  "openid",
-  "email",
-  "profile",
-];
 
-// Bing Webmaster Constants
+const GOOGLE_GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
+const GOOGLE_GA4_SCOPE = "https://www.googleapis.com/auth/analytics.readonly";
+const GOOGLE_BASE_SCOPES = ["openid", "email", "profile"];
+
+// Bing Webmaster Constants (Official Read-Only Scope)
 const BING_AUTH_URL = "https://www.bing.com/webmasters/oauth/authorize";
 const BING_TOKEN_URL = "https://www.bing.com/webmasters/oauth/token";
-const BING_SCOPE = "https://webmaster.bing.com/api/webmaster.manage";
+const BING_SCOPE = "https://webmaster.bing.com/api/webmaster.read";
 
 /**
  * Derives the exact OAuth callback URL based on request context.
- * Prioritizes production domain https://sharflow.online, but supports dev/preview origin if specified.
+ * Strict rules:
+ * - Production default: https://sharflow.online/api/oauth-callback
+ * - Supports configured APP_URL
+ * - In non-production, supports validated local dev or preview container origins
+ * - Strictly rejects arbitrary external origins
  */
 function resolveRedirectUri(req, clientOrigin) {
   const isProd = process.env.NODE_ENV === "production";
-  const host = req.headers["x-forwarded-host"] || req.headers.host || "";
-  
-  if (clientOrigin && (clientOrigin.includes("run.app") || clientOrigin.includes("localhost"))) {
-    return `${clientOrigin.replace(/\/+$/, "")}/api/oauth-callback`;
+  const validatedOrigin = getValidatedOrigin(clientOrigin, req);
+
+  // In non-production, allow validated local dev or preview container callback
+  if (!isProd && (validatedOrigin.includes("localhost") || validatedOrigin.includes("127.0.0.1") || validatedOrigin.includes("run.app") || validatedOrigin.includes("vercel.app"))) {
+    return `${validatedOrigin}/api/oauth-callback`;
   }
-  if (host.includes("sharflow.online") || isProd) {
-    return "https://sharflow.online/api/oauth-callback";
-  }
-  if (host) {
-    const proto = req.headers["x-forwarded-proto"] || "http";
-    return `${proto}://${host}/api/oauth-callback`;
-  }
-  return "https://sharflow.online/api/oauth-callback";
+
+  const prodBase = PRODUCTION_ORIGIN || "https://sharflow.online";
+  return `${prodBase}/api/oauth-callback`;
 }
 
 /**
  * Returns HTML to inform user and postMessage to opener window.
+ * STRICT SECURITY:
+ * - postMessage targetOrigin is strictly validated (never "*").
+ * - safeReturn URL is strictly sanitized against open redirects.
  */
 function renderCallbackHtml(options) {
-  const { success, provider, error, returnUrl } = options;
-  const safeReturn = returnUrl || "/";
+  const { success, provider, error, targetOrigin, returnUrl } = options;
+  const safeOrigin = getValidatedOrigin(targetOrigin);
+  const safeReturn = getSafeReturnUrl(returnUrl, safeOrigin);
   const safeProvider = provider ? String(provider).replace(/[^a-zA-Z0-9_-]/g, "") : "";
   const safeError = error ? String(error).replace(/[<>&"]/g, "") : "";
 
@@ -147,11 +151,12 @@ function renderCallbackHtml(options) {
     (function() {
       try {
         if (window.opener && !window.opener.closed) {
+          var targetOrigin = ${JSON.stringify(safeOrigin)};
           window.opener.postMessage({
             type: "${success ? "OAUTH_AUTH_SUCCESS" : "OAUTH_AUTH_ERROR"}",
             provider: "${safeProvider}",
             error: "${safeError}"
-          }, "*");
+          }, targetOrigin);
           ${success ? 'setTimeout(function() { window.close(); }, 1000);' : ''}
         }
       } catch (e) {
@@ -177,28 +182,89 @@ module.exports = async function handler(req, res) {
       return res.status(401).json({ ok: false, error: "Unauthorized. Please sign in to connect data sources." });
     }
 
-    const provider = req.query.provider || urlObj.searchParams.get("provider") || "google";
+    const rawProvider = req.query.provider || urlObj.searchParams.get("provider") || "google_search_console";
+    let targetProvider = rawProvider;
+    if (rawProvider === "google") targetProvider = "google_search_console";
+    if (rawProvider === "bing") targetProvider = "bing_webmaster";
+
     const clientOrigin = req.query.origin || urlObj.searchParams.get("origin") || "";
+    const validatedOrigin = getValidatedOrigin(clientOrigin, req);
     const redirectUri = resolveRedirectUri(req, clientOrigin);
 
     if (!jwtSecret) {
       return res.status(500).json({ ok: false, error: "JWT_SECRET is missing from server configuration." });
     }
 
-    // Sign state parameter containing authenticated email and provider
+    // Connect via existing stored Google token if it already has the required scope
+    if (targetProvider === "google_search_console" || targetProvider === "google_analytics") {
+      try {
+        const db = await getDb();
+        const datasourcesCol = db.collection("datasources");
+        const requiredScopeKeyword = targetProvider === "google_search_console" ? "webmasters" : "analytics";
+
+        // Check if there is an existing stored Google token for this user
+        const existingGoogle = await datasourcesCol.findOne({
+          userEmail,
+          provider: { $in: ["google_search_console", "google_analytics", "google"] },
+          encryptedRefreshToken: { $exists: true, $ne: "" },
+        });
+
+        if (existingGoogle && existingGoogle.encryptedRefreshToken) {
+          const existingScopes = Array.isArray(existingGoogle.scopes) ? existingGoogle.scopes : [];
+          const hasRequiredScope = existingScopes.some((s) => s.toLowerCase().includes(requiredScopeKeyword));
+
+          if (hasRequiredScope) {
+            // Already authorized with this scope! Connect this specific provider without prompting user again.
+            const now = new Date();
+            await datasourcesCol.updateOne(
+              { userEmail, provider: targetProvider },
+              {
+                $set: {
+                  userId: existingGoogle.userId || userEmail,
+                  userEmail,
+                  provider: targetProvider,
+                  providerAccountId: existingGoogle.providerAccountId || "",
+                  scopes: existingScopes,
+                  status: "connected",
+                  encryptedRefreshToken: existingGoogle.encryptedRefreshToken,
+                  updatedAt: now,
+                },
+                $setOnInsert: {
+                  createdAt: now,
+                  selectedProperty: null,
+                  lastSuccessfulSync: null,
+                },
+              },
+              { upsert: true }
+            );
+
+            return res.status(200).json({
+              ok: true,
+              connectedDirectly: true,
+              provider: targetProvider,
+              message: `Connected ${targetProvider === "google_analytics" ? "Google Analytics" : "Google Search Console"} using your existing Google authorization.`,
+            });
+          }
+        }
+      } catch (checkErr) {
+        console.warn("[OAuth] Error checking existing token:", checkErr.message);
+      }
+    }
+
+    // Sign state parameter containing authenticated email and specific target provider
     const stateToken = jwt.sign(
       {
         email: userEmail,
-        provider,
+        provider: targetProvider,
         redirectUri,
-        clientOrigin,
+        clientOrigin: validatedOrigin,
         nonce: Math.random().toString(36).substring(2),
       },
       jwtSecret,
       { expiresIn: "20m" }
     );
 
-    if (provider === "google" || provider === "google_search_console" || provider === "google_analytics") {
+    if (targetProvider === "google_search_console" || targetProvider === "google_analytics") {
       const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
       if (!clientId) {
         return res.status(400).json({
@@ -207,11 +273,15 @@ module.exports = async function handler(req, res) {
         });
       }
 
+      const targetScopes = targetProvider === "google_analytics"
+        ? [GOOGLE_GA4_SCOPE, ...GOOGLE_BASE_SCOPES]
+        : [GOOGLE_GSC_SCOPE, ...GOOGLE_BASE_SCOPES];
+
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirectUri,
         response_type: "code",
-        scope: GOOGLE_SCOPES.join(" "),
+        scope: targetScopes.join(" "),
         access_type: "offline",
         prompt: "consent",
         include_granted_scopes: "true",
@@ -222,7 +292,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, url: authUrl, redirectUri });
     }
 
-    if (provider === "bing" || provider === "bing_webmaster") {
+    if (targetProvider === "bing_webmaster") {
       const clientId = (process.env.BING_CLIENT_ID || "").trim();
       if (!clientId) {
         return res.status(400).json({
@@ -243,7 +313,7 @@ module.exports = async function handler(req, res) {
       return res.status(200).json({ ok: true, url: authUrl, redirectUri });
     }
 
-    return res.status(400).json({ ok: false, error: `Unsupported provider: ${provider}` });
+    return res.status(400).json({ ok: false, error: `Unsupported provider: ${targetProvider}` });
   }
 
   // ── 2. HANDLE OAUTH CALLBACK ─────────────────────────────────────────────
@@ -253,12 +323,15 @@ module.exports = async function handler(req, res) {
     const providerError = req.query.error || urlObj.searchParams.get("error");
     const errorDescription = req.query.error_description || urlObj.searchParams.get("error_description");
 
+    const fallbackOrigin = getValidatedOrigin(null, req);
+
     if (providerError) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(400).send(
         renderCallbackHtml({
           success: false,
           error: errorDescription || providerError,
+          targetOrigin: fallbackOrigin,
           returnUrl: "/",
         })
       );
@@ -270,6 +343,7 @@ module.exports = async function handler(req, res) {
         renderCallbackHtml({
           success: false,
           error: "Missing authorization code or state token.",
+          targetOrigin: fallbackOrigin,
           returnUrl: "/",
         })
       );
@@ -285,13 +359,19 @@ module.exports = async function handler(req, res) {
         renderCallbackHtml({
           success: false,
           error: "Invalid or expired authorization session. Please try connecting again.",
+          targetOrigin: fallbackOrigin,
           returnUrl: "/",
         })
       );
     }
 
-    const { email: userEmail, provider, redirectUri, clientOrigin } = statePayload;
-    const returnUrl = clientOrigin || "/";
+    const { email: userEmail, provider: rawProvider, redirectUri, clientOrigin } = statePayload;
+    const validatedOrigin = getValidatedOrigin(clientOrigin, req);
+    const returnUrl = getSafeReturnUrl(clientOrigin, validatedOrigin);
+
+    let requestedProvider = rawProvider;
+    if (rawProvider === "google") requestedProvider = "google_search_console";
+    if (rawProvider === "bing") requestedProvider = "bing_webmaster";
 
     if (!hasEncryptionKey()) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -299,6 +379,7 @@ module.exports = async function handler(req, res) {
         renderCallbackHtml({
           success: false,
           error: "Server configuration error: OAUTH_TOKEN_ENCRYPTION_KEY is missing. Tokens cannot be securely encrypted.",
+          targetOrigin: validatedOrigin,
           returnUrl,
         })
       );
@@ -313,7 +394,7 @@ module.exports = async function handler(req, res) {
       const userId = user ? user._id : userEmail;
 
       // ── Handle Google Token Exchange ──────────────────────────────────
-      if (provider === "google" || provider === "google_search_console" || provider === "google_analytics") {
+      if (requestedProvider === "google_search_console" || requestedProvider === "google_analytics") {
         const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
         const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
 
@@ -364,24 +445,28 @@ module.exports = async function handler(req, res) {
           // If prompt was skipped or user already authorized, check existing stored token
           const existing = await datasourcesCol.findOne({
             userEmail,
-            provider: { $in: ["google_search_console", "google_analytics"] },
+            provider: { $in: ["google_search_console", "google_analytics", "google"] },
+            encryptedRefreshToken: { $exists: true, $ne: "" },
           });
           if (existing && existing.encryptedRefreshToken) {
             encryptedRefreshToken = existing.encryptedRefreshToken;
           }
         }
 
-        const grantedScopes = tokenData.scope ? tokenData.scope.split(" ") : GOOGLE_SCOPES;
+        const grantedScopes = tokenData.scope ? tokenData.scope.split(" ") : [];
         const now = new Date();
 
-        // Save Google Search Console connection record
+        const targetProvider = requestedProvider;
+        const otherProvider = targetProvider === "google_search_console" ? "google_analytics" : "google_search_console";
+
+        // 1. Mark ONLY the explicitly requested provider as connected
         await datasourcesCol.updateOne(
-          { userEmail, provider: "google_search_console" },
+          { userEmail, provider: targetProvider },
           {
             $set: {
               userId,
               userEmail,
-              provider: "google_search_console",
+              provider: targetProvider,
               providerAccountId: googleAccountEmail,
               scopes: grantedScopes,
               status: "connected",
@@ -397,41 +482,60 @@ module.exports = async function handler(req, res) {
           { upsert: true }
         );
 
-        // Save Google Analytics 4 connection record
-        await datasourcesCol.updateOne(
-          { userEmail, provider: "google_analytics" },
-          {
-            $set: {
-              userId,
-              userEmail,
-              provider: "google_analytics",
-              providerAccountId: googleAccountEmail,
-              scopes: grantedScopes,
-              status: "connected",
-              updatedAt: now,
-              ...(encryptedRefreshToken ? { encryptedRefreshToken } : {}),
+        // 2. Handle the other Google provider:
+        // Do NOT mark other provider connected unless it was ALREADY connected before.
+        const existingOther = await datasourcesCol.findOne({ userEmail, provider: otherProvider });
+        if (existingOther && existingOther.status === "connected") {
+          // Keep it connected and update its refresh credentials
+          await datasourcesCol.updateOne(
+            { userEmail, provider: otherProvider },
+            {
+              $set: {
+                providerAccountId: googleAccountEmail,
+                scopes: grantedScopes,
+                updatedAt: now,
+                ...(encryptedRefreshToken ? { encryptedRefreshToken } : {}),
+              },
+            }
+          );
+        } else if (encryptedRefreshToken) {
+          // Keep credentials available without marking the other provider as connected
+          await datasourcesCol.updateOne(
+            { userEmail, provider: otherProvider },
+            {
+              $set: {
+                userId,
+                userEmail,
+                provider: otherProvider,
+                providerAccountId: googleAccountEmail,
+                scopes: grantedScopes,
+                status: existingOther?.status || "not_connected",
+                encryptedRefreshToken,
+                updatedAt: now,
+              },
+              $setOnInsert: {
+                createdAt: now,
+                selectedProperty: null,
+                lastSuccessfulSync: null,
+              },
             },
-            $setOnInsert: {
-              createdAt: now,
-              selectedProperty: null,
-              lastSuccessfulSync: null,
-            },
-          },
-          { upsert: true }
-        );
+            { upsert: true }
+          );
+        }
 
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         return res.status(200).send(
           renderCallbackHtml({
             success: true,
-            provider: "google",
+            provider: targetProvider,
+            targetOrigin: validatedOrigin,
             returnUrl,
           })
         );
       }
 
       // ── Handle Bing Webmaster Token Exchange ─────────────────────────
-      if (provider === "bing" || provider === "bing_webmaster") {
+      if (requestedProvider === "bing_webmaster") {
         const clientId = (process.env.BING_CLIENT_ID || "").trim();
         const clientSecret = (process.env.BING_CLIENT_SECRET || "").trim();
 
@@ -489,12 +593,13 @@ module.exports = async function handler(req, res) {
           renderCallbackHtml({
             success: true,
             provider: "bing_webmaster",
+            targetOrigin: validatedOrigin,
             returnUrl,
           })
         );
       }
 
-      throw new Error(`Unrecognized OAuth provider: ${provider}`);
+      throw new Error(`Unrecognized OAuth provider: ${requestedProvider}`);
     } catch (err) {
       console.error("[OAuth Callback Error]", err.message);
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -502,6 +607,7 @@ module.exports = async function handler(req, res) {
         renderCallbackHtml({
           success: false,
           error: err.message || "Failed to complete data source authorization.",
+          targetOrigin: validatedOrigin,
           returnUrl,
         })
       );

@@ -1630,6 +1630,13 @@ async function initiateOAuth(provider) {
       return;
     }
 
+    if (data.connectedDirectly) {
+      toast(data.message || "Connected via existing Google authorization!");
+      await loadDataSources();
+      await loadProperties(provider);
+      return;
+    }
+
     const popup = window.open(
       data.url,
       "sharflow_oauth_window",
@@ -1815,13 +1822,28 @@ async function disconnectDataSource(provider) {
 
 // Global OAuth popup message listener
 window.addEventListener("message", async (event) => {
+  // Validate sender origin matches current window origin or trusted Sharflow domain
+  const origin = event.origin || "";
+  const isTrusted =
+    origin === window.location.origin ||
+    origin === "https://sharflow.online" ||
+    origin === "https://www.sharflow.online" ||
+    origin === "https://sharflow.com" ||
+    origin === "https://www.sharflow.com" ||
+    origin.endsWith(".run.app") ||
+    origin.endsWith(".vercel.app") ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1");
+
+  if (!isTrusted) return;
+
   if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
     toast("Authorization successful! Loading available properties…");
     await loadDataSources();
     
     // Auto open property selection for the newly connected provider
     const prov = event.data.provider;
-    if (prov === "google" || prov === "google_search_console") {
+    if (prov === "google_search_console" || prov === "google") {
       loadProperties("google_search_console");
     } else if (prov === "google_analytics") {
       loadProperties("google_analytics");
