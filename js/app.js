@@ -5,6 +5,7 @@ const STORAGE = {
   profile: "signal_profile",
   msgs: "signal_messages",
   email: "signal_email",
+  userName: "signal_user_name",
   profileForm: "signal_profile_form",
   plan: "signal_plan",
   token: "signal_jwt_token",
@@ -54,6 +55,16 @@ function getSavedForm() {
   }
 }
 
+function getUserName() {
+  const storedName = localStorage.getItem(STORAGE.userName);
+  if (storedName && storedName.trim()) return storedName.trim();
+  const form = getSavedForm();
+  if (form.name && form.name.trim()) return form.name.trim();
+  const pfEl = document.getElementById("pf-name");
+  if (pfEl && pfEl.value.trim()) return pfEl.value.trim();
+  return "";
+}
+
 function authHeaders() {
   const token = localStorage.getItem(STORAGE.token) || "";
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -61,10 +72,13 @@ function authHeaders() {
 
 function applyUserToLocalState(user) {
   if (!user) return;
-  if (user.name) {
+  if (user.name && user.name.trim()) {
+    localStorage.setItem(STORAGE.userName, user.name.trim());
     const form = getSavedForm();
-    form.name = user.name;
+    form.name = user.name.trim();
     localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
+    const pfName = document.getElementById("pf-name");
+    if (pfName) pfName.value = user.name.trim();
   }
   if (user.plan) localStorage.setItem(STORAGE.plan, user.plan);
   if (user.profile?.summary) localStorage.setItem(STORAGE.profile, user.profile.summary);
@@ -76,7 +90,9 @@ function applyUserToLocalState(user) {
     localStorage.setItem(
       STORAGE.profileForm,
       JSON.stringify({
-        name: user.name || existing.name || "",
+        ...existing,
+        ...user.profile,
+        name: user.name || existing.name || localStorage.getItem(STORAGE.userName) || "",
         websiteUrl: user.profile.websiteUrl || existing.websiteUrl || "",
         websiteType: user.profile.websiteType || existing.websiteType || "",
         websitePurpose: user.profile.websitePurpose || existing.websitePurpose || "",
@@ -85,14 +101,16 @@ function applyUserToLocalState(user) {
         profession: user.profile.profession || existing.profession || "",
         goals: user.profile.goals || existing.goals || "",
         topics: user.profile.topics || existing.topics || "",
-        avoid: user.profile.avoid || existing.avoid || "",
+        avoid: user.profile.avoid !== undefined ? user.profile.avoid : (existing.avoid || ""),
         customSources: user.profile.customSources || existing.customSources || "",
         language: user.profile.language || existing.language || "English",
-        country: user.profile.country || existing.country || "United States",
+        country: user.profile.country !== undefined ? user.profile.country : (existing.country || "United States"),
         newsScope: user.profile.newsScope || existing.newsScope || "Website Performance",
         digestLength: user.profile.digestLength || existing.digestLength || "Standard",
+        tone: user.profile.tone || existing.tone || "concise",
         digestTime: user.profile.digestTime || existing.digestTime || "08:00",
         timezone: user.profile.timezone || existing.timezone || "UTC",
+        lockedUntil: user.profile.lockedUntil || existing.lockedUntil || null,
       })
     );
   }
@@ -176,7 +194,14 @@ async function handleSignup() {
     }
     localStorage.setItem(STORAGE.token, data.token);
     localStorage.setItem(STORAGE.email, email);
+    localStorage.setItem(STORAGE.userName, name);
+    const form = getSavedForm();
+    form.name = name;
+    localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
     document.getElementById("pf-name").value = name;
+    if (data.user) {
+      applyUserToLocalState(data.user);
+    }
     closeAuthModal();
     showOnboarding();
   } catch {
@@ -658,33 +683,39 @@ async function submitWebsiteOnboarding() {
   const btn = document.getElementById("btn-confirm-onboard");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "Setting up Watchdog…";
+    btn.textContent = "Saving Watchdog profile…";
   }
 
   const summaryText = buildWebsiteSummaryText(onboardingData);
   const lockUntil = new Date();
   lockUntil.setDate(lockUntil.getDate() + 7);
 
+  const existingForm = getSavedForm();
+  const userFullName = getUserName();
+
   const form = {
-    name: localStorage.getItem(STORAGE.email)?.split("@")[0] || "User",
+    ...existingForm,
+    name: userFullName || existingForm.name || "",
+    profileMode: "website-watchdog-onboarding",
     websiteUrl: onboardingData.websiteUrl,
     websiteType: onboardingData.websiteType,
     websitePurpose: onboardingData.websitePurpose,
     monitoringPriorities: onboardingData.monitoringPriorities,
     importantPages: onboardingData.importantPages,
     summary: summaryText,
-    profession: `${onboardingData.websiteType} Owner`,
-    goals: onboardingData.websitePurpose,
-    topics: (onboardingData.monitoringPriorities || []).join(", ") || "Website performance, SEO, search traffic",
-    avoid: "Broken tracking, vanity metrics without impact",
-    customSources: onboardingData.websiteUrl,
-    language: "English",
-    country: "United States",
-    newsScope: "Website Performance",
-    digestLength: "Standard",
-    tone: "concise",
-    digestTime: "08:00",
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    profession: existingForm.profession || (onboardingData.websiteType ? `${onboardingData.websiteType} Owner` : "Website Owner"),
+    goals: existingForm.goals || onboardingData.websitePurpose || "Monitor website performance",
+    topics: existingForm.topics || ((onboardingData.monitoringPriorities || []).join(", ") || "Website performance, SEO, search traffic"),
+    avoid: existingForm.avoid !== undefined ? existingForm.avoid : "Broken tracking, vanity metrics without impact",
+    customSources: existingForm.customSources || onboardingData.websiteUrl || "",
+    language: existingForm.language || "English",
+    country: existingForm.country !== undefined ? existingForm.country : "United States",
+    newsScope: existingForm.newsScope || "Website Performance",
+    digestLength: existingForm.digestLength || "Standard",
+    tone: existingForm.tone || "concise",
+    digestTime: existingForm.digestTime || "08:00",
+    timezone: existingForm.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    lockedUntil: existingForm.lockedUntil || lockUntil.toISOString(),
   };
 
   localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
@@ -704,6 +735,7 @@ async function submitWebsiteOnboarding() {
           plan: localStorage.getItem(STORAGE.plan) || "starter",
           lockedUntil: lockUntil.toISOString(),
           profile: {
+            profileMode: "website-watchdog-onboarding",
             websiteUrl: form.websiteUrl,
             websiteType: form.websiteType,
             websitePurpose: form.websitePurpose,
@@ -722,6 +754,7 @@ async function submitWebsiteOnboarding() {
             tone: form.tone,
             digestTime: form.digestTime,
             timezone: form.timezone,
+            lockedUntil: form.lockedUntil,
           },
         }),
       });
@@ -745,12 +778,11 @@ async function submitWebsiteOnboarding() {
 
   if (btn) {
     btn.disabled = false;
-    btn.textContent = "Continue to Watchdog →";
+    btn.textContent = "Confirm & Open Dashboard →";
   }
 
-  toast("Your Watchdog profile is ready");
+  toast("Your Watchdog profile is ready. Connect your data sources when available to start monitoring.");
   showDashboard(lockUntil, summaryText);
-  generateDashboardDigest(true);
 }
 
 function digestLengthToTone(length) {
@@ -890,7 +922,8 @@ function showDashboard(lockDate, profileText, email) {
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
   const form = getSavedForm();
-  const name = form.name ? `, ${form.name.split(" ")[0]}` : "";
+  const userFullName = getUserName();
+  const name = userFullName ? `, ${userFullName.split(" ")[0]}` : (form.name ? `, ${form.name.split(" ")[0]}` : "");
   document.getElementById("dash-greeting").textContent = greet + name;
 
   // Website details
@@ -900,6 +933,16 @@ function showDashboard(lockDate, profileText, email) {
   if (dpType) dpType.textContent = form.websiteType || form.profession || "—";
   const dpGoal = document.getElementById("dp-goal");
   if (dpGoal) dpGoal.textContent = form.websitePurpose || form.goals || "—";
+
+  // Watchdog status fields
+  const dpProfStatus = document.getElementById("dp-profile-status");
+  if (dpProfStatus) dpProfStatus.textContent = "Saved ✓";
+  const dpCfgStatus = document.getElementById("dp-config-status");
+  if (dpCfgStatus) dpCfgStatus.textContent = "Saved ✓";
+  const dpIntegrations = document.getElementById("dp-integrations");
+  if (dpIntegrations) dpIntegrations.textContent = "Not connected yet";
+  const dpStatus = document.getElementById("dp-status");
+  if (dpStatus) dpStatus.textContent = "Begins after data sources connect";
 
   // Legacy/fallback elements
   const dpProf = document.getElementById("dp-profession");
@@ -1159,10 +1202,16 @@ function renderCachedDigest() {
   } else if (content) {
     el.className = "digest-content";
     setDigestContent(el, content);
-    note.textContent = `Cached from ${date} — tap Generate for today's edition`;
+    note.textContent = `Cached from ${date}`;
   } else {
     el.className = "digest-content empty";
-    el.textContent = "No digest yet. Hit Generate to pull live stories matched to your profile.";
+    el.innerHTML = `
+      <div style="padding:14px 4px;">
+        <p style="margin:0 0 6px;font-weight:600;color:var(--text);font-size:14px;">No monitoring reports yet</p>
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5;">Your website profile and monitoring configuration are saved. Actual Watchdog alerts will begin after data sources are connected.</p>
+        <button class="btn btn-secondary btn-sm" id="btn-generate-digest" onclick="generateDashboardDigest(false)">Generate news brief ↻</button>
+      </div>
+    `;
     note.textContent = "";
   }
   syncDigestPanels();

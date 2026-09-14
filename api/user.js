@@ -148,30 +148,117 @@ async function handler(req, res) {
       // ── SAVE profile + memory ─────────────────────────────────────────────
       const update = { $set: { updatedAt: now } };
 
-      if (body.name) update.$set.name = body.name;
+      if (body.name && typeof body.name === "string" && body.name.trim()) {
+        update.$set.name = body.name.trim();
+      }
       if (body.plan) update.$set.plan = body.plan;
 
       if (body.profile) {
+        const existingProfile = (user && user.profile) ? user.profile : {};
+        const isWatchdog = body.profile.profileMode === "website-watchdog-onboarding" || Boolean(body.profile.websiteUrl);
+
+        const profileMode = body.profile.profileMode || (isWatchdog ? "website-watchdog-onboarding" : (existingProfile.profileMode || "standard"));
+
+        // Watchdog fields
+        const websiteUrl = (body.profile.websiteUrl !== undefined && body.profile.websiteUrl !== "")
+          ? body.profile.websiteUrl
+          : (existingProfile.websiteUrl || "");
+
+        const websiteType = (body.profile.websiteType !== undefined && body.profile.websiteType !== "")
+          ? body.profile.websiteType
+          : (existingProfile.websiteType || "");
+
+        const websitePurpose = (body.profile.websitePurpose !== undefined && body.profile.websitePurpose !== "")
+          ? body.profile.websitePurpose
+          : (existingProfile.websitePurpose || "");
+
+        const monitoringPriorities = Array.isArray(body.profile.monitoringPriorities) && body.profile.monitoringPriorities.length > 0
+          ? body.profile.monitoringPriorities
+          : (Array.isArray(existingProfile.monitoringPriorities) ? existingProfile.monitoringPriorities : []);
+
+        const importantPages = Array.isArray(body.profile.importantPages)
+          ? body.profile.importantPages
+          : (Array.isArray(existingProfile.importantPages) ? existingProfile.importantPages : []);
+
+        const summary = body.profile.summary || existingProfile.summary || "";
+
+        // Legacy fields to strictly preserve:
+        // profession, goals, topics, avoid, customSources, language, country, newsScope, digestLength, tone, digestTime, timezone, lockedUntil
+        const profession = isWatchdog
+          ? (existingProfile.profession || body.profile.profession || (websiteType ? `${websiteType} Owner` : "Website Owner"))
+          : (body.profile.profession !== undefined ? body.profile.profession : (existingProfile.profession || ""));
+
+        const goals = isWatchdog
+          ? (existingProfile.goals || body.profile.goals || websitePurpose || "Monitor website performance")
+          : (body.profile.goals !== undefined ? body.profile.goals : (existingProfile.goals || ""));
+
+        const topics = isWatchdog
+          ? (existingProfile.topics || body.profile.topics || (monitoringPriorities.length > 0 ? monitoringPriorities.join(", ") : "Website performance, SEO, search traffic"))
+          : (body.profile.topics !== undefined ? body.profile.topics : (existingProfile.topics || ""));
+
+        const avoid = isWatchdog
+          ? (existingProfile.avoid !== undefined ? existingProfile.avoid : (body.profile.avoid !== undefined ? body.profile.avoid : "Broken tracking, vanity metrics without impact"))
+          : (body.profile.avoid !== undefined ? body.profile.avoid : (existingProfile.avoid || ""));
+
+        const customSources = isWatchdog
+          ? (existingProfile.customSources || body.profile.customSources || websiteUrl || "")
+          : (body.profile.customSources !== undefined ? body.profile.customSources : (existingProfile.customSources || ""));
+
+        const language = isWatchdog
+          ? (existingProfile.language || body.profile.language || "English")
+          : (body.profile.language || existingProfile.language || "English");
+
+        const country = isWatchdog
+          ? (existingProfile.country !== undefined ? existingProfile.country : (body.profile.country || "United States"))
+          : (body.profile.country !== undefined ? body.profile.country : (existingProfile.country || "United States"));
+
+        const newsScope = isWatchdog
+          ? (existingProfile.newsScope || body.profile.newsScope || "Website Performance")
+          : (body.profile.newsScope || existingProfile.newsScope || "Mixed");
+
+        const digestLength = isWatchdog
+          ? (existingProfile.digestLength || body.profile.digestLength || "Standard")
+          : (body.profile.digestLength || existingProfile.digestLength || "Standard");
+
+        const tone = isWatchdog
+          ? (existingProfile.tone || body.profile.tone || "concise")
+          : (body.profile.tone || existingProfile.tone || "balanced");
+
+        const digestTime = isWatchdog
+          ? (existingProfile.digestTime || body.profile.digestTime || "08:00")
+          : (body.profile.digestTime || existingProfile.digestTime || "08:00");
+
+        const timezone = isWatchdog
+          ? (existingProfile.timezone || body.profile.timezone || "UTC")
+          : (body.profile.timezone || existingProfile.timezone || "UTC");
+
+        const lockedUntil = body.lockedUntil
+          ? new Date(body.lockedUntil)
+          : (body.profile.lockedUntil
+              ? new Date(body.profile.lockedUntil)
+              : (existingProfile.lockedUntil ? new Date(existingProfile.lockedUntil) : null));
+
         const profile = {
-          summary: body.profile.summary || "",
-          websiteUrl: body.profile.websiteUrl || "",
-          websiteType: body.profile.websiteType || "",
-          websitePurpose: body.profile.websitePurpose || "",
-          monitoringPriorities: Array.isArray(body.profile.monitoringPriorities) ? body.profile.monitoringPriorities : [],
-          importantPages: Array.isArray(body.profile.importantPages) ? body.profile.importantPages : [],
-          profession: body.profile.profession || (body.profile.websiteType ? `${body.profile.websiteType} Owner` : ""),
-          goals: body.profile.goals || body.profile.websitePurpose || "",
-          topics: body.profile.topics || (Array.isArray(body.profile.monitoringPriorities) ? body.profile.monitoringPriorities.join(", ") : ""),
-          avoid: body.profile.avoid || "",
-          customSources: body.profile.customSources || body.profile.websiteUrl || "",
-          language: body.profile.language || "English",
-          country: body.profile.country || "",
-          newsScope: body.profile.newsScope || "Website Performance",
-          digestLength: body.profile.digestLength || "Standard",
-          tone: body.profile.tone || "concise",
-          digestTime: body.profile.digestTime || "08:00",
-          timezone: body.profile.timezone || "UTC",
-          lockedUntil: body.lockedUntil ? new Date(body.lockedUntil) : null,
+          profileMode,
+          websiteUrl,
+          websiteType,
+          websitePurpose,
+          monitoringPriorities,
+          importantPages,
+          summary,
+          profession,
+          goals,
+          topics,
+          avoid,
+          customSources,
+          language,
+          country,
+          newsScope,
+          digestLength,
+          tone,
+          digestTime,
+          timezone,
+          lockedUntil,
           savedAt: now,
         };
         update.$set.profile = profile;

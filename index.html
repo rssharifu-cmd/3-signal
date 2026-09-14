@@ -415,7 +415,7 @@
           <div style="display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);border:1px solid #A7F3D0;color:var(--green);padding:4px 12px;border-radius:100px;font-size:12px;font-weight:700;margin-bottom:14px;">
             ✓ Profile Ready
           </div>
-          <h2>Your Watchdog is set up</h2>
+          <h2>Your Watchdog profile is ready</h2>
           <p class="step-lead" style="margin-bottom:18px;">Review your monitoring profile before continuing to your dashboard.</p>
           
           <div class="profile-summary-card" style="margin-bottom:20px;">
@@ -444,13 +444,13 @@
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:24px;display:flex;gap:12px;align-items:flex-start;">
             <span style="font-size:18px;line-height:1.2;">ℹ️</span>
             <p style="font-size:13px;color:var(--muted);line-height:1.55;margin:0;">
-              <strong>Your website profile is ready.</strong> Connect your data sources when available to start monitoring.
+              <strong>Your Watchdog profile is ready.</strong> Connect your data sources when available to start monitoring.
             </p>
           </div>
 
           <div class="onboard-actions">
             <button class="btn btn-secondary" onclick="prevOnboardStep(5)">← Edit</button>
-            <button class="btn btn-primary" id="btn-confirm-onboard" onclick="submitWebsiteOnboarding()">Continue to Watchdog →</button>
+            <button class="btn btn-primary" id="btn-confirm-onboard" onclick="submitWebsiteOnboarding()">Confirm & Open Dashboard →</button>
           </div>
         </div>
       </div>
@@ -471,12 +471,33 @@
       <div class="dash-panel" id="panel-overview">
         <div class="dash-header">
           <h1 id="dash-greeting">Good afternoon</h1>
-          <p>Your daily intelligence brief arrives every morning. Next edition coming tomorrow.</p>
+          <p id="dash-subgreeting">Your website monitoring profile is configured. Data sources will be connected in the next phase.</p>
         </div>
+
+        <!-- Watchdog Status Banner -->
+        <div class="watchdog-banner" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px 20px;margin-bottom:20px;">
+          <div style="display:flex;align-items:flex-start;gap:14px;">
+            <div style="font-size:22px;line-height:1;margin-top:2px;">🛡️</div>
+            <div style="flex:1;">
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
+                <h3 style="margin:0;font-size:15px;font-weight:700;color:var(--text);">Watchdog Status: Profile Configured</h3>
+                <span style="display:inline-block;background:var(--green-soft);color:var(--green);border:1px solid #A7F3D0;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;">Profile Saved</span>
+                <span style="display:inline-block;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;">Awaiting Data Sources</span>
+              </div>
+              <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--muted);line-height:1.6;">
+                <li><strong>Website profile:</strong> Saved</li>
+                <li><strong>Monitoring configuration:</strong> Saved</li>
+                <li><strong>Data sources:</strong> Not connected yet</li>
+                <li><strong>Monitoring:</strong> Actual monitoring will begin after data sources are connected</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         <div class="dash-grid">
           <div class="dash-card span-2">
             <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;">
-              <h3>Latest digest</h3>
+              <h3>Latest intelligence</h3>
               <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this digest ✉️</button>
             </div>
             <div class="digest-panel">
@@ -493,9 +514,11 @@
           </div>
           <div class="dash-card">
             <div class="dash-card-head"><h3>Monitoring scope</h3></div>
-            <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages">—</span></div>
-            <div class="profile-row"><span class="label">Status</span><span id="dp-status" style="color:var(--green);font-weight:600;">Profile Ready</span></div>
-            <div class="profile-row"><span class="label">Integrations</span><span id="dp-integrations" style="color:var(--amber-text);font-weight:600;">Connect when available</span></div>
+            <div class="profile-row"><span class="label">Website Profile</span><span id="dp-profile-status" style="color:var(--green);font-weight:600;">Saved ✓</span></div>
+            <div class="profile-row"><span class="label">Monitoring Config</span><span id="dp-config-status" style="color:var(--green);font-weight:600;">Saved ✓</span></div>
+            <div class="profile-row"><span class="label">Data Sources</span><span id="dp-integrations" style="color:#D97706;font-weight:600;">Not connected yet</span></div>
+            <div class="profile-row"><span class="label">Status</span><span id="dp-status" style="color:var(--muted);font-weight:500;font-size:12px;">Begins after data sources connect</span></div>
+            <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages" style="font-size:12px;">—</span></div>
           </div>
         </div>
       </div>
