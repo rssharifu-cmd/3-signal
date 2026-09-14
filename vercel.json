@@ -4,7 +4,11 @@
   "rewrites": [
     { "source": "/api/auth", "destination": "/api/auth.js" },
     { "source": "/api/chat", "destination": "/api/chat.js" },
+    { "source": "/api/datasources", "destination": "/api/datasources.js" },
     { "source": "/api/news", "destination": "/api/news.js" },
+    { "source": "/api/oauth", "destination": "/api/oauth.js" },
+    { "source": "/api/oauth/callback", "destination": "/api/oauth.js" },
+    { "source": "/api/oauth-callback", "destination": "/api/oauth-callback.js" },
     { "source": "/api/send", "destination": "/api/send.js" },
     { "source": "/api/user", "destination": "/api/user.js" },
     { "source": "/privacy", "destination": "/privacy.html" },

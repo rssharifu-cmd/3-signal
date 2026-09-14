@@ -12,6 +12,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/css", express.static(path.join(__dirname, "css")));
 app.use("/js", express.static(path.join(__dirname, "js")));
 
+// Support nested oauth subroute
+app.all("/api/oauth/:subroute", async (req, res) => {
+  const handler = require("./api/oauth");
+  return handler(req, res);
+});
+
 // Bind and route any API endpoints dynamically to their corresponding file in /api
 app.all("/api/:route", async (req, res) => {
   const routeName = req.params.route;

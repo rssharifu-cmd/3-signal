@@ -465,6 +465,7 @@
   <div id="dashboard-view" class="dash-layout hidden">
     <aside class="dash-sidebar">
       <button class="dash-nav-item active" data-panel="overview" onclick="dashNav('overview')">Overview</button>
+      <button class="dash-nav-item" data-panel="sources" onclick="dashNav('sources')">Data Sources</button>
       <button class="dash-nav-item" data-panel="digest" onclick="dashNav('digest')">Today's digest</button>
       <button class="dash-nav-item" data-panel="profile" onclick="dashNav('profile')">Profile</button>
     </aside>
@@ -519,10 +520,166 @@
             <div class="dash-card-head"><h3>Monitoring scope</h3></div>
             <div class="profile-row"><span class="label">Website Profile</span><span id="dp-profile-status" style="color:var(--green);font-weight:600;">Saved ✓</span></div>
             <div class="profile-row"><span class="label">Monitoring Config</span><span id="dp-config-status" style="color:var(--green);font-weight:600;">Saved ✓</span></div>
-            <div class="profile-row"><span class="label">Data Sources</span><span id="dp-integrations" style="color:#D97706;font-weight:600;">Not connected yet</span></div>
+            <div class="profile-row" style="align-items:center;"><span class="label">Data Sources</span><span id="dp-integrations" style="color:#D97706;font-weight:600;">Not connected yet</span> <button class="btn btn-secondary btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px;" onclick="dashNav('sources')">Manage Sources →</button></div>
             <div class="profile-row"><span class="label">Status</span><span id="dp-status" style="color:var(--muted);font-weight:500;font-size:12px;">Begins after data sources connect</span></div>
             <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages" style="font-size:12px;">—</span></div>
           </div>
+        </div>
+      </div>
+
+      <!-- Data Sources panel -->
+      <div class="dash-panel hidden" id="panel-sources">
+        <div class="dash-header">
+          <h1>Data Sources</h1>
+          <p>Connect your search and analytics platforms to feed live performance data into Sharflow Website Watchdog.</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(310px, 1fr));gap:20px;margin-bottom:24px;">
+
+          <!-- 1. Google Search Console -->
+          <div class="dash-card" id="source-card-gsc">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:24px;line-height:1;">🔍</span>
+                <div>
+                  <h3 style="margin:0;font-size:16px;">Google Search Console</h3>
+                  <div style="margin-top:4px;">
+                    <span id="gsc-status-badge" style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;">Not connected</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:12px 0 16px;">
+              Tracks verified Google organic search clicks, impressions, keyword position movements, and crawl/indexing issues.
+            </p>
+
+            <div id="gsc-connected-info" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:13px;">
+              <div style="margin-bottom:8px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Selected Property</span>
+                <strong id="gsc-property-label" style="color:var(--text);font-size:13px;word-break:break-all;">—</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);">
+                <span>Last synced:</span>
+                <strong id="gsc-last-sync" style="color:var(--text);font-weight:600;">Never</strong>
+              </div>
+              <div id="gsc-account-row" style="margin-top:4px;font-size:11px;color:var(--muted);display:none;">
+                <span>Account: </span><span id="gsc-account-email">—</span>
+              </div>
+            </div>
+
+            <!-- Property Selection Box -->
+            <div id="gsc-picker" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:14px;">
+              <label style="display:block;font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">Select Search Console Property:</label>
+              <select id="gsc-select" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--text);margin-bottom:10px;"></select>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" id="btn-save-gsc" onclick="saveSelectedProperty('google_search_console')">Confirm Property ✓</button>
+                <button class="btn btn-secondary btn-sm" onclick="hidePropertyPicker('google_search_console')">Cancel</button>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-primary btn-sm" id="btn-connect-gsc" onclick="initiateOAuth('google_search_console')">Connect Search Console →</button>
+              <button class="btn btn-secondary btn-sm" id="btn-change-gsc" style="display:none;" onclick="loadProperties('google_search_console')">Change Property</button>
+              <button class="btn btn-secondary btn-sm" id="btn-disconnect-gsc" style="display:none;color:#DC2626;" onclick="disconnectDataSource('google_search_console')">Disconnect</button>
+            </div>
+          </div>
+
+          <!-- 2. Google Analytics 4 -->
+          <div class="dash-card" id="source-card-ga4">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:24px;line-height:1;">📊</span>
+                <div>
+                  <h3 style="margin:0;font-size:16px;">Google Analytics</h3>
+                  <div style="margin-top:4px;">
+                    <span id="ga4-status-badge" style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;">Not connected</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:12px 0 16px;">
+              Monitors active website visitors, engagement sessions, goal conversion drops, and traffic anomalies.
+            </p>
+
+            <div id="ga4-connected-info" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:13px;">
+              <div style="margin-bottom:8px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Selected Property</span>
+                <strong id="ga4-property-label" style="color:var(--text);font-size:13px;word-break:break-all;">—</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);">
+                <span>Last synced:</span>
+                <strong id="ga4-last-sync" style="color:var(--text);font-weight:600;">Never</strong>
+              </div>
+              <div id="ga4-account-row" style="margin-top:4px;font-size:11px;color:var(--muted);display:none;">
+                <span>Account: </span><span id="ga4-account-email">—</span>
+              </div>
+            </div>
+
+            <!-- Property Selection Box -->
+            <div id="ga4-picker" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:14px;">
+              <label style="display:block;font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">Select GA4 Property:</label>
+              <select id="ga4-select" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--text);margin-bottom:10px;"></select>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" id="btn-save-ga4" onclick="saveSelectedProperty('google_analytics')">Confirm Property ✓</button>
+                <button class="btn btn-secondary btn-sm" onclick="hidePropertyPicker('google_analytics')">Cancel</button>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-primary btn-sm" id="btn-connect-ga4" onclick="initiateOAuth('google_analytics')">Connect Analytics →</button>
+              <button class="btn btn-secondary btn-sm" id="btn-change-ga4" style="display:none;" onclick="loadProperties('google_analytics')">Change Property</button>
+              <button class="btn btn-secondary btn-sm" id="btn-disconnect-ga4" style="display:none;color:#DC2626;" onclick="disconnectDataSource('google_analytics')">Disconnect</button>
+            </div>
+          </div>
+
+          <!-- 3. Bing Webmaster Tools -->
+          <div class="dash-card" id="source-card-bing">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:24px;line-height:1;">🌐</span>
+                <div>
+                  <h3 style="margin:0;font-size:16px;">Bing Webmaster</h3>
+                  <div style="margin-top:4px;">
+                    <span id="bing-status-badge" style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;background:#FEF3C7;color:#92400E;border:1px solid #FDE68A;">Not connected</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:12px 0 16px;">
+              Tracks Bing and Microsoft Copilot search indexing, crawl anomalies, sitemaps, and organic impressions.
+            </p>
+
+            <div id="bing-connected-info" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;margin-bottom:14px;font-size:13px;">
+              <div style="margin-bottom:8px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Selected Site</span>
+                <strong id="bing-property-label" style="color:var(--text);font-size:13px;word-break:break-all;">—</strong>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);">
+                <span>Last synced:</span>
+                <strong id="bing-last-sync" style="color:var(--text);font-weight:600;">Never</strong>
+              </div>
+            </div>
+
+            <!-- Property Selection Box -->
+            <div id="bing-picker" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:14px;">
+              <label style="display:block;font-size:12px;font-weight:700;color:var(--text);margin-bottom:6px;">Select Verified Bing Site:</label>
+              <select id="bing-select" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--surface);color:var(--text);margin-bottom:10px;"></select>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary btn-sm" id="btn-save-bing" onclick="saveSelectedProperty('bing_webmaster')">Confirm Site ✓</button>
+                <button class="btn btn-secondary btn-sm" onclick="hidePropertyPicker('bing_webmaster')">Cancel</button>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-primary btn-sm" id="btn-connect-bing" onclick="initiateOAuth('bing_webmaster')">Connect Bing →</button>
+              <button class="btn btn-secondary btn-sm" id="btn-change-bing" style="display:none;" onclick="loadProperties('bing_webmaster')">Change Site</button>
+              <button class="btn btn-secondary btn-sm" id="btn-disconnect-bing" style="display:none;color:#DC2626;" onclick="disconnectDataSource('bing_webmaster')">Disconnect</button>
+            </div>
+          </div>
+
         </div>
       </div>
 

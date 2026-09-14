@@ -979,6 +979,7 @@ function showDashboard(lockDate, profileText, email) {
   startLockCountdown(lockDate);
   renderCachedDigest();
   if (profileText) localStorage.setItem(STORAGE.profile, profileText);
+  loadDataSources();
 }
 
 function syncProfilePanels() {
@@ -1279,6 +1280,9 @@ function dashNav(panel) {
   if (panel === "settings") {
     loadSettingsIntoDashboard();
   }
+  if (panel === "sources") {
+    loadDataSources();
+  }
 }
 
 // ── Reset & init ──────────────────────────────────────────────────────────────
@@ -1473,6 +1477,362 @@ async function trackEngagementClick(topic, storyTitle, url) {
   }
 }
 
+// ── Data Sources Connection & Property Management ────────────────────────────
+let cachedDataSources = null;
+
+async function loadDataSources() {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) return;
+
+  try {
+    const res = await fetch("/api/datasources", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok || !data.sources) return;
+
+    cachedDataSources = data.sources;
+    renderDataSourceCard("google_search_console", data.sources.google_search_console, "gsc");
+    renderDataSourceCard("google_analytics", data.sources.google_analytics, "ga4");
+    renderDataSourceCard("bing_webmaster", data.sources.bing_webmaster, "bing");
+
+    updateOverviewSourcesSummary(data.sources);
+  } catch (err) {
+    console.warn("[DataSources] Failed to fetch sources status:", err.message);
+  }
+}
+
+function renderDataSourceCard(provider, info, prefix) {
+  const badge = document.getElementById(`${prefix}-status-badge`);
+  const connInfo = document.getElementById(`${prefix}-connected-info`);
+  const propLabel = document.getElementById(`${prefix}-property-label`);
+  const lastSync = document.getElementById(`${prefix}-last-sync`);
+  const accRow = document.getElementById(`${prefix}-account-row`);
+  const accEmail = document.getElementById(`${prefix}-account-email`);
+
+  const btnConnect = document.getElementById(`btn-connect-${prefix}`);
+  const btnChange = document.getElementById(`btn-change-${prefix}`);
+  const btnDisconnect = document.getElementById(`btn-disconnect-${prefix}`);
+
+  if (info && info.connected) {
+    if (badge) {
+      badge.textContent = "Connected ✓";
+      badge.style.background = "var(--green-soft)";
+      badge.style.color = "var(--green)";
+      badge.style.borderColor = "#A7F3D0";
+    }
+    if (connInfo) connInfo.style.display = "block";
+    if (propLabel) {
+      if (info.selectedProperty && info.selectedProperty.name) {
+        propLabel.textContent = info.selectedProperty.name;
+        propLabel.style.color = "var(--text)";
+      } else {
+        propLabel.textContent = "No property selected yet — click below to select";
+        propLabel.style.color = "#D97706";
+      }
+    }
+    if (lastSync) {
+      lastSync.textContent = info.lastSuccessfulSync
+        ? new Date(info.lastSuccessfulSync).toLocaleString()
+        : "Ready to sync";
+    }
+    if (accRow && accEmail && info.accountEmail) {
+      accEmail.textContent = info.accountEmail;
+      accRow.style.display = "block";
+    }
+
+    if (btnConnect) btnConnect.style.display = "none";
+    if (btnChange) btnChange.style.display = "inline-block";
+    if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+  } else {
+    if (badge) {
+      badge.textContent = "Not connected";
+      badge.style.background = "#FEF3C7";
+      badge.style.color = "#92400E";
+      badge.style.borderColor = "#FDE68A";
+    }
+    if (connInfo) connInfo.style.display = "none";
+    if (btnConnect) btnConnect.style.display = "inline-block";
+    if (btnChange) btnChange.style.display = "none";
+    if (btnDisconnect) btnDisconnect.style.display = "none";
+  }
+}
+
+function updateOverviewSourcesSummary(sources) {
+  const gsc = sources.google_search_console?.connected;
+  const ga4 = sources.google_analytics?.connected;
+  const bing = sources.bing_webmaster?.connected;
+
+  const connectedCount = [gsc, ga4, bing].filter(Boolean).length;
+  const dpIntegrations = document.getElementById("dp-integrations");
+  const dpStatus = document.getElementById("dp-status");
+
+  if (dpIntegrations) {
+    if (connectedCount === 0) {
+      dpIntegrations.textContent = "Not connected yet";
+      dpIntegrations.style.color = "#D97706";
+    } else if (connectedCount === 3) {
+      dpIntegrations.textContent = "All 3 connected ✓";
+      dpIntegrations.style.color = "var(--green)";
+    } else {
+      dpIntegrations.textContent = `${connectedCount} of 3 connected ✓`;
+      dpIntegrations.style.color = "var(--green)";
+    }
+  }
+
+  if (dpStatus) {
+    if (connectedCount > 0) {
+      const selectedNames = [
+        sources.google_search_console?.selectedProperty?.name,
+        sources.google_analytics?.selectedProperty?.name,
+        sources.bing_webmaster?.selectedProperty?.name,
+      ].filter(Boolean);
+
+      if (selectedNames.length > 0) {
+        dpStatus.textContent = `Monitoring configured for: ${selectedNames[0]}`;
+        dpStatus.style.color = "var(--text)";
+      } else {
+        dpStatus.textContent = "Connected. Select properties to begin monitoring.";
+        dpStatus.style.color = "#D97706";
+      }
+    } else {
+      dpStatus.textContent = "Begins after data sources connect";
+      dpStatus.style.color = "var(--muted)";
+    }
+  }
+}
+
+async function initiateOAuth(provider) {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) {
+    openAuthModal("login");
+    toast("Please sign in or create an account first.");
+    return;
+  }
+
+  const prefix = provider === "google_search_console" ? "gsc" : provider === "google_analytics" ? "ga4" : "bing";
+  const btn = document.getElementById(`btn-connect-${prefix}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Connecting…";
+  }
+
+  try {
+    const origin = window.location.origin;
+    const res = await fetch(`/api/oauth?action=url&provider=${encodeURIComponent(provider)}&origin=${encodeURIComponent(origin)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      toast(data.error || "Failed to start OAuth connection.");
+      return;
+    }
+
+    const popup = window.open(
+      data.url,
+      "sharflow_oauth_window",
+      "width=600,height=720,menubar=no,toolbar=no,status=no"
+    );
+
+    if (!popup) {
+      toast("Popup was blocked by your browser. Please allow popups for this site.");
+    }
+  } catch (err) {
+    toast("Connection error: " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = provider === "bing_webmaster" ? "Connect Bing →" : provider === "google_analytics" ? "Connect Analytics →" : "Connect Search Console →";
+    }
+  }
+}
+
+async function loadProperties(provider) {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) return;
+
+  const prefix = provider === "google_search_console" ? "gsc" : provider === "google_analytics" ? "ga4" : "bing";
+  const picker = document.getElementById(`${prefix}-picker`);
+  const select = document.getElementById(`${prefix}-select`);
+  const btnChange = document.getElementById(`btn-change-${prefix}`);
+
+  if (btnChange) {
+    btnChange.disabled = true;
+    btnChange.textContent = "Loading properties…";
+  }
+
+  try {
+    const res = await fetch(`/api/datasources?action=properties&provider=${encodeURIComponent(provider)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      toast(data.error || "Could not retrieve accessible properties.");
+      return;
+    }
+
+    const properties = data.properties || [];
+    if (properties.length === 0) {
+      toast("No properties found in this account. Please verify your website in the provider console first.");
+      return;
+    }
+
+    if (select) {
+      select.innerHTML = "";
+      const form = getSavedForm();
+      const userDomain = (form.websiteUrl || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+
+      let autoSelected = false;
+      properties.forEach((prop, idx) => {
+        const opt = document.createElement("option");
+        opt.value = prop.id;
+        opt.textContent = prop.name || prop.id;
+        opt.dataset.prop = JSON.stringify(prop);
+
+        // Preselect matching website domain
+        const propStr = (prop.id + " " + (prop.name || "")).toLowerCase();
+        if (userDomain && propStr.includes(userDomain) && !autoSelected) {
+          opt.selected = true;
+          autoSelected = true;
+        } else if (idx === 0 && !autoSelected) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    }
+
+    if (picker) picker.style.display = "block";
+  } catch (err) {
+    toast("Failed to load properties: " + err.message);
+  } finally {
+    if (btnChange) {
+      btnChange.disabled = false;
+      btnChange.textContent = provider === "bing_webmaster" ? "Change Site" : "Change Property";
+    }
+  }
+}
+
+function hidePropertyPicker(provider) {
+  const prefix = provider === "google_search_console" ? "gsc" : provider === "google_analytics" ? "ga4" : "bing";
+  const picker = document.getElementById(`${prefix}-picker`);
+  if (picker) picker.style.display = "none";
+}
+
+async function saveSelectedProperty(provider) {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) return;
+
+  const prefix = provider === "google_search_console" ? "gsc" : provider === "google_analytics" ? "ga4" : "bing";
+  const select = document.getElementById(`${prefix}-select`);
+  const btn = document.getElementById(`btn-save-${prefix}`);
+
+  if (!select || !select.value) {
+    toast("Please choose a property from the list.");
+    return;
+  }
+
+  const selectedOpt = select.options[select.selectedIndex];
+  let propertyObj = { id: select.value, name: selectedOpt.textContent };
+  try {
+    if (selectedOpt.dataset.prop) {
+      propertyObj = JSON.parse(selectedOpt.dataset.prop);
+    }
+  } catch {}
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+  }
+
+  try {
+    const res = await fetch("/api/datasources", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        action: "select_property",
+        provider,
+        property: propertyObj,
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      toast(data.error || "Failed to save property.");
+      return;
+    }
+
+    hidePropertyPicker(provider);
+    toast("Property saved! Sharflow Watchdog monitoring updated.");
+    await loadDataSources();
+  } catch (err) {
+    toast("Error saving property: " + err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = provider === "bing_webmaster" ? "Confirm Site ✓" : "Confirm Property ✓";
+    }
+  }
+}
+
+async function disconnectDataSource(provider) {
+  const providerTitle = provider === "bing_webmaster" ? "Bing Webmaster" : provider === "google_analytics" ? "Google Analytics" : "Google Search Console";
+  if (!confirm(`Are you sure you want to disconnect ${providerTitle}?`)) {
+    return;
+  }
+
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) return;
+
+  try {
+    const res = await fetch("/api/datasources", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action: "disconnect", provider }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      toast(data.error || "Failed to disconnect data source.");
+      return;
+    }
+
+    toast(`${providerTitle} disconnected.`);
+    hidePropertyPicker(provider);
+    await loadDataSources();
+  } catch (err) {
+    toast("Disconnect error: " + err.message);
+  }
+}
+
+// Global OAuth popup message listener
+window.addEventListener("message", async (event) => {
+  if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
+    toast("Authorization successful! Loading available properties…");
+    await loadDataSources();
+    
+    // Auto open property selection for the newly connected provider
+    const prov = event.data.provider;
+    if (prov === "google" || prov === "google_search_console") {
+      loadProperties("google_search_console");
+    } else if (prov === "google_analytics") {
+      loadProperties("google_analytics");
+    } else if (prov === "bing" || prov === "bing_webmaster") {
+      loadProperties("bing_webmaster");
+    }
+  } else if (event.data?.type === "OAUTH_AUTH_ERROR") {
+    toast("Connection failed: " + (event.data.error || "Authorization error."));
+  }
+});
+
 // Expose for inline handlers
 window.openAuthModal = openAuthModal;
 window.closeAuthModal = closeAuthModal;
@@ -1499,3 +1859,9 @@ window.submitFeedback = submitFeedback;
 window.loadSettingsIntoDashboard = loadSettingsIntoDashboard;
 window.saveDashboardSettings = saveDashboardSettings;
 window.trackEngagementClick = trackEngagementClick;
+window.initiateOAuth = initiateOAuth;
+window.loadProperties = loadProperties;
+window.hidePropertyPicker = hidePropertyPicker;
+window.saveSelectedProperty = saveSelectedProperty;
+window.disconnectDataSource = disconnectDataSource;
+window.loadDataSources = loadDataSources;
