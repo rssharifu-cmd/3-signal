@@ -33,7 +33,7 @@ const GOOGLE_BASE_SCOPES = ["openid", "email", "profile"];
 // Bing Webmaster Constants (Official Read-Only Scope)
 const BING_AUTH_URL = "https://www.bing.com/webmasters/oauth/authorize";
 const BING_TOKEN_URL = "https://www.bing.com/webmasters/oauth/token";
-const BING_SCOPE = "webmaster.read";
+const BING_SCOPE = "webmaster.manage";
 
 /**
  * Derives the exact OAuth callback URL based on request context.
