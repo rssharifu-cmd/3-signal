@@ -980,6 +980,9 @@ function showDashboard(lockDate, profileText, email) {
   renderCachedDigest();
   if (profileText) localStorage.setItem(STORAGE.profile, profileText);
   loadDataSources();
+  if (window.location.hash === "#sources" || window.location.hash === "#datasources") {
+    dashNav("sources");
+  }
 }
 
 function syncProfilePanels() {
@@ -1283,6 +1286,13 @@ function dashNav(panel) {
   if (panel === "sources") {
     loadDataSources();
   }
+  try {
+    if (panel === "overview") {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    } else {
+      history.replaceState(null, "", `#${panel}`);
+    }
+  } catch {}
 }
 
 // ── Reset & init ──────────────────────────────────────────────────────────────
@@ -1618,35 +1628,55 @@ async function initiateOAuth(provider) {
     btn.textContent = "Connecting…";
   }
 
+  // Open popup synchronously during user click to prevent browser popup blockers
+  let popup = null;
+  try {
+    popup = window.open(
+      "about:blank",
+      "sharflow_oauth_window",
+      "width=600,height=720,menubar=no,toolbar=no,status=no,location=yes,scrollbars=yes,resizable=yes"
+    );
+    if (popup) {
+      try {
+        const providerName = provider === "bing_webmaster" ? "Bing Webmaster Tools" : provider === "google_analytics" ? "Google Analytics" : "Google Search Console";
+        popup.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Connecting to ${providerName}…</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#FAF9F5;color:#1E1E1C;font-size:14px;text-align:center;padding:20px;}</style></head><body><div><div style="font-size:24px;margin-bottom:12px;">⏳</div><div>Connecting to ${providerName}…</div></div></body></html>`);
+      } catch {}
+    }
+  } catch (popupErr) {
+    console.warn("Could not open synchronous popup:", popupErr);
+  }
+
   try {
     const origin = window.location.origin;
-    const res = await fetch(`/api/oauth?action=url&provider=${encodeURIComponent(provider)}&origin=${encodeURIComponent(origin)}`, {
+    const returnUrl = `${origin}/#sources`;
+    const res = await fetch(`/api/oauth?action=url&provider=${encodeURIComponent(provider)}&origin=${encodeURIComponent(origin)}&returnUrl=${encodeURIComponent(returnUrl)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
 
     if (!res.ok || !data.ok) {
+      if (popup && !popup.closed) popup.close();
       toast(data.error || "Failed to start OAuth connection.");
       return;
     }
 
     if (data.connectedDirectly) {
+      if (popup && !popup.closed) popup.close();
       toast(data.message || "Connected via existing Google authorization!");
       await loadDataSources();
       await loadProperties(provider);
       return;
     }
 
-    const popup = window.open(
-      data.url,
-      "sharflow_oauth_window",
-      "width=600,height=720,menubar=no,toolbar=no,status=no"
-    );
-
-    if (!popup) {
+    if (!popup || popup.closed) {
       toast("Popup was blocked by your browser. Please allow popups for this site.");
+      return;
     }
+
+    popup.location.href = data.url;
+    if (popup.focus) popup.focus();
   } catch (err) {
+    if (popup && !popup.closed) popup.close();
     toast("Connection error: " + err.message);
   } finally {
     if (btn) {

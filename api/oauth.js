@@ -188,8 +188,10 @@ module.exports = async function handler(req, res) {
     if (rawProvider === "bing") targetProvider = "bing_webmaster";
 
     const clientOrigin = req.query.origin || urlObj.searchParams.get("origin") || "";
+    const clientReturnUrl = req.query.returnUrl || urlObj.searchParams.get("returnUrl") || "";
     const validatedOrigin = getValidatedOrigin(clientOrigin, req);
     const redirectUri = resolveRedirectUri(req, clientOrigin);
+    const safeReturnUrl = getSafeReturnUrl(clientReturnUrl || `${validatedOrigin}/#sources`, validatedOrigin);
 
     if (!jwtSecret) {
       return res.status(500).json({ ok: false, error: "JWT_SECRET is missing from server configuration." });
@@ -258,6 +260,7 @@ module.exports = async function handler(req, res) {
         provider: targetProvider,
         redirectUri,
         clientOrigin: validatedOrigin,
+        returnUrl: safeReturnUrl,
         nonce: Math.random().toString(36).substring(2),
       },
       jwtSecret,
@@ -324,6 +327,18 @@ module.exports = async function handler(req, res) {
     const errorDescription = req.query.error_description || urlObj.searchParams.get("error_description");
 
     const fallbackOrigin = getValidatedOrigin(null, req);
+    const defaultReturnUrl = `${fallbackOrigin}/#sources`;
+
+    // Attempt to extract safe returnUrl and targetOrigin from state if present
+    let stateReturnUrl = defaultReturnUrl;
+    let stateOrigin = fallbackOrigin;
+    if (state && jwtSecret) {
+      try {
+        const decoded = jwt.verify(state, jwtSecret);
+        if (decoded.clientOrigin) stateOrigin = getValidatedOrigin(decoded.clientOrigin, req);
+        if (decoded.returnUrl) stateReturnUrl = getSafeReturnUrl(decoded.returnUrl, stateOrigin);
+      } catch {}
+    }
 
     if (providerError) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -331,8 +346,8 @@ module.exports = async function handler(req, res) {
         renderCallbackHtml({
           success: false,
           error: errorDescription || providerError,
-          targetOrigin: fallbackOrigin,
-          returnUrl: "/",
+          targetOrigin: stateOrigin,
+          returnUrl: stateReturnUrl,
         })
       );
     }
@@ -344,7 +359,7 @@ module.exports = async function handler(req, res) {
           success: false,
           error: "Missing authorization code or state token.",
           targetOrigin: fallbackOrigin,
-          returnUrl: "/",
+          returnUrl: defaultReturnUrl,
         })
       );
     }
@@ -360,14 +375,14 @@ module.exports = async function handler(req, res) {
           success: false,
           error: "Invalid or expired authorization session. Please try connecting again.",
           targetOrigin: fallbackOrigin,
-          returnUrl: "/",
+          returnUrl: defaultReturnUrl,
         })
       );
     }
 
-    const { email: userEmail, provider: rawProvider, redirectUri, clientOrigin } = statePayload;
+    const { email: userEmail, provider: rawProvider, redirectUri, clientOrigin, returnUrl: storedReturnUrl } = statePayload;
     const validatedOrigin = getValidatedOrigin(clientOrigin, req);
-    const returnUrl = getSafeReturnUrl(clientOrigin, validatedOrigin);
+    const returnUrl = getSafeReturnUrl(storedReturnUrl || `${validatedOrigin}/#sources`, validatedOrigin);
 
     let requestedProvider = rawProvider;
     if (rawProvider === "google") requestedProvider = "google_search_console";
