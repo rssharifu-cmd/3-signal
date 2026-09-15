@@ -36,6 +36,29 @@ const BING_TOKEN_URL = "https://www.bing.com/webmasters/oauth/token";
 const BING_SCOPE = "webmaster.manage";
 
 /**
+ * Parses HTTP Cookie header into key-value map.
+ */
+function parseCookies(req) {
+  const list = {};
+  const rc = req.headers?.cookie;
+  if (rc) {
+    rc.split(";").forEach((cookie) => {
+      const parts = cookie.split("=");
+      const key = parts[0] ? parts[0].trim() : "";
+      if (key) {
+        const val = parts.slice(1).join("=").trim();
+        try {
+          list[key] = decodeURIComponent(val);
+        } catch {
+          list[key] = val;
+        }
+      }
+    });
+  }
+  return list;
+}
+
+/**
  * Derives the exact OAuth callback URL based on request context.
  * Strict rules:
  * - Production default: https://sharflow.online/api/oauth-callback
@@ -267,6 +290,43 @@ module.exports = async function handler(req, res) {
       { expiresIn: "20m" }
     );
 
+    // Set secure cookie and save pending state in DB to support providers like Bing
+    // that omit the state parameter on redirect callback
+    const isHttps = Boolean(req.headers?.["x-forwarded-proto"] === "https" || process.env.NODE_ENV === "production");
+    const cookieFlags = [
+      `sharflow_oauth_state=${encodeURIComponent(stateToken)}`,
+      "Path=/",
+      "Max-Age=1200",
+      "SameSite=Lax",
+      "HttpOnly",
+    ];
+    if (isHttps) cookieFlags.push("Secure");
+    res.setHeader("Set-Cookie", cookieFlags.join("; "));
+
+    try {
+      const db = await getDb();
+      await db.collection("oauth_pending").updateOne(
+        { email: userEmail, provider: targetProvider },
+        {
+          $set: {
+            email: userEmail,
+            provider: targetProvider,
+            stateToken,
+            redirectUri,
+            clientOrigin: validatedOrigin,
+            returnUrl: safeReturnUrl,
+            updatedAt: new Date(),
+          },
+          $setOnInsert: {
+            createdAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
+    } catch (dbPendingErr) {
+      console.warn("[OAuth] Could not save pending state in DB:", dbPendingErr.message);
+    }
+
     if (targetProvider === "google_search_console" || targetProvider === "google_analytics") {
       const clientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
       if (!clientId) {
@@ -322,9 +382,34 @@ module.exports = async function handler(req, res) {
   // ── 2. HANDLE OAUTH CALLBACK ─────────────────────────────────────────────
   if (isCallback) {
     const code = req.query.code || urlObj.searchParams.get("code");
-    const state = req.query.state || urlObj.searchParams.get("state");
+    let state = req.query.state || urlObj.searchParams.get("state");
     const providerError = req.query.error || urlObj.searchParams.get("error");
     const errorDescription = req.query.error_description || urlObj.searchParams.get("error_description");
+
+    // If state is not in query params (e.g. Bing Webmaster OAuth omits state on redirect),
+    // recover the signed state token from cookie or database pending record
+    if (!state) {
+      const cookies = parseCookies(req);
+      if (cookies.sharflow_oauth_state) {
+        state = cookies.sharflow_oauth_state;
+      }
+    }
+
+    if (!state && code) {
+      try {
+        const db = await getDb();
+        const cutoff = new Date(Date.now() - 20 * 60 * 1000);
+        const pending = await db.collection("oauth_pending").findOne(
+          { provider: "bing_webmaster", updatedAt: { $gte: cutoff } },
+          { sort: { updatedAt: -1 } }
+        );
+        if (pending && pending.stateToken) {
+          state = pending.stateToken;
+        }
+      } catch (dbFindErr) {
+        console.warn("[OAuth] Could not query pending oauth state:", dbFindErr.message);
+      }
+    }
 
     const fallbackOrigin = getValidatedOrigin(null, req);
     const defaultReturnUrl = `${fallbackOrigin}/#sources`;
@@ -341,6 +426,7 @@ module.exports = async function handler(req, res) {
     }
 
     if (providerError) {
+      res.setHeader("Set-Cookie", "sharflow_oauth_state=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(400).send(
         renderCallbackHtml({
@@ -353,13 +439,14 @@ module.exports = async function handler(req, res) {
     }
 
     if (!code || !state) {
+      res.setHeader("Set-Cookie", "sharflow_oauth_state=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(400).send(
         renderCallbackHtml({
           success: false,
           error: "Missing authorization code or state token.",
-          targetOrigin: fallbackOrigin,
-          returnUrl: defaultReturnUrl,
+          targetOrigin: stateOrigin || fallbackOrigin,
+          returnUrl: stateReturnUrl || defaultReturnUrl,
         })
       );
     }
@@ -369,16 +456,27 @@ module.exports = async function handler(req, res) {
     try {
       statePayload = jwt.verify(state, jwtSecret);
     } catch (err) {
+      res.setHeader("Set-Cookie", "sharflow_oauth_state=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       return res.status(400).send(
         renderCallbackHtml({
           success: false,
           error: "Invalid or expired authorization session. Please try connecting again.",
-          targetOrigin: fallbackOrigin,
-          returnUrl: defaultReturnUrl,
+          targetOrigin: stateOrigin || fallbackOrigin,
+          returnUrl: stateReturnUrl || defaultReturnUrl,
         })
       );
     }
+
+    // Clean up pending state in DB and clear cookie
+    try {
+      const db = await getDb();
+      await db.collection("oauth_pending").deleteMany({
+        email: statePayload.email,
+        provider: statePayload.provider,
+      });
+    } catch {}
+    res.setHeader("Set-Cookie", "sharflow_oauth_state=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly");
 
     const { email: userEmail, provider: rawProvider, redirectUri, clientOrigin, returnUrl: storedReturnUrl } = statePayload;
     const validatedOrigin = getValidatedOrigin(clientOrigin, req);

@@ -1640,6 +1640,7 @@ async function initiateOAuth(provider) {
       try {
         const providerName = provider === "bing_webmaster" ? "Bing Webmaster Tools" : provider === "google_analytics" ? "Google Analytics" : "Google Search Console";
         popup.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Connecting to ${providerName}…</title><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#FAF9F5;color:#1E1E1C;font-size:14px;text-align:center;padding:20px;}</style></head><body><div><div style="font-size:24px;margin-bottom:12px;">⏳</div><div>Connecting to ${providerName}…</div></div></body></html>`);
+        popup.document.close();
       } catch {}
     }
   } catch (popupErr) {

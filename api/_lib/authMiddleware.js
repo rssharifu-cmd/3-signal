@@ -109,7 +109,7 @@ function getValidatedOrigin(candidate, req) {
  * @returns {string}
  */
 function getSafeReturnUrl(rawUrl, validatedOrigin) {
-  if (!rawUrl || typeof rawUrl !== "string") return "/";
+  if (!rawUrl || typeof rawUrl !== "string") return "/#sources";
   const trimmed = rawUrl.trim();
 
   // Safe relative paths starting with single '/' and not '//'
@@ -117,15 +117,15 @@ function getSafeReturnUrl(rawUrl, validatedOrigin) {
     return trimmed;
   }
 
-  // Absolute URL matching validated origin
+  // Absolute URL matching validated origin or any trusted origin
   try {
     const parsed = new URL(trimmed);
-    if (parsed.origin === validatedOrigin) {
+    if (parsed.origin === validatedOrigin || isTrustedOrigin(parsed.origin)) {
       return parsed.pathname + parsed.search + parsed.hash;
     }
   } catch {}
 
-  return "/";
+  return "/#sources";
 }
 
 function cors(req, res) {
