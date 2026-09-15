@@ -10,7 +10,7 @@
     "dev": "node server.js",
     "build": "echo 'No build phase needed for static web'",
     "start": "node server.js",
-    "lint": "node -c server.js api/cryptoUtils.js api/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js js/app.js"
+    "lint": "node -c server.js api/_lib/cryptoUtils.js api/_lib/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js js/app.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

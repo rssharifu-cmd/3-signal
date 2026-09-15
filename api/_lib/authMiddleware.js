@@ -84,7 +84,9 @@ function getValidatedOrigin(candidate, req) {
   // Fallback to request host if request is from a trusted host
   if (req) {
     const host = req.headers?.["x-forwarded-host"] || req.headers?.host || "";
-    const proto = req.headers?.["x-forwarded-proto"] || "https";
+    const isLocal = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+    const defaultProto = isLocal ? (req.protocol || "http") : "https";
+    const proto = req.headers?.["x-forwarded-proto"] || defaultProto;
     if (host) {
       const candidateHostOrigin = `${proto}://${host}`;
       if (isTrustedOrigin(candidateHostOrigin)) {

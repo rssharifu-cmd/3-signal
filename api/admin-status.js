@@ -14,8 +14,8 @@
  * and email present in ADMIN_EMAILS environment variable.
  */
 
-const { cors, extractEmail } = require("./authMiddleware");
-const { getDb } = require("./db");
+const { cors, extractEmail } = require("./_lib/authMiddleware");
+const { getDb } = require("./_lib/db");
 
 const TIMEOUT_MS = 8000;
 

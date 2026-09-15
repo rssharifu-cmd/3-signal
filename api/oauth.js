@@ -15,9 +15,9 @@
  */
 
 const jwt = require("jsonwebtoken");
-const { getDb } = require("./db");
-const { cors, extractEmail, isTrustedOrigin, getValidatedOrigin, getSafeReturnUrl, PRODUCTION_ORIGIN } = require("./authMiddleware");
-const { encryptToken, hasEncryptionKey } = require("./cryptoUtils");
+const { getDb } = require("./_lib/db");
+const { cors, extractEmail, isTrustedOrigin, getValidatedOrigin, getSafeReturnUrl, PRODUCTION_ORIGIN } = require("./_lib/authMiddleware");
+const { encryptToken, hasEncryptionKey } = require("./_lib/cryptoUtils");
 
 const jwtSecret = (process.env.JWT_SECRET || "").trim();
 

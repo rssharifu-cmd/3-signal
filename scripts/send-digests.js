@@ -14,8 +14,8 @@
  */
 
 require("dotenv").config();
-const { getDb } = require("../api/db");
-const { formatMemoryForPrompt, ensureMemory, buildDigestPrompt } = require("../api/memory");
+const { getDb } = require("../api/_lib/db");
+const { formatMemoryForPrompt, ensureMemory, buildDigestPrompt } = require("../api/_lib/memory");
 
 const GROK_URL    = "https://api.groq.com/openai/v1/chat/completions";
 const RESEND_URL  = "https://api.resend.com/emails";

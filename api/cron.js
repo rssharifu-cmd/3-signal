@@ -9,8 +9,8 @@
  * but the code is preserved here for historical reference.
  */
 
-const { getDb } = require("./db");
-const { formatMemoryForPrompt, ensureMemory } = require("./memory");
+const { getDb } = require("./_lib/db");
+const { formatMemoryForPrompt, ensureMemory } = require("./_lib/memory");
 
 const GROK_URL    = "https://api.groq.com/openai/v1/chat/completions";
 const RESEND_URL  = "https://api.resend.com/emails";

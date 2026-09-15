@@ -11,15 +11,15 @@
  * - Access tokens are used only server-side.
  */
 
-const { getDb } = require("./db");
-const { cors, extractEmail } = require("./authMiddleware");
+const { getDb } = require("./_lib/db");
+const { cors, extractEmail } = require("./_lib/authMiddleware");
 const {
   getGoogleAccessToken,
   getBingAccessToken,
   discoverSearchConsoleProperties,
   discoverAnalyticsProperties,
   discoverBingSites,
-} = require("./oauthTokens");
+} = require("./_lib/oauthTokens");
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;

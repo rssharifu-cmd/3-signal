@@ -17,7 +17,7 @@
 
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { getDb } = require("./db");
+const { getDb } = require("./_lib/db");
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";

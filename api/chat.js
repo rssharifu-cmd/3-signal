@@ -5,7 +5,7 @@
  * Modified to support Gemini automatically as the primary intelligence model.
  */
 
-const { formatMemoryForPrompt, buildDigestPrompt } = require("./memory");
+const { formatMemoryForPrompt, buildDigestPrompt } = require("./_lib/memory");
 const { GoogleGenAI } = require("@google/genai");
 
 const GROK_URL = "https://api.groq.com/openai/v1/chat/completions";

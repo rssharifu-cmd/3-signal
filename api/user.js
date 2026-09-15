@@ -10,13 +10,13 @@
  */
 
 const jwt = require("jsonwebtoken");
-const { getDb } = require("./db");
+const { getDb } = require("./_lib/db");
 const {
   buildMemoryFromOnboarding,
   applyFeedback,
   applyClick,
   ensureMemory,
-} = require("./memory");
+} = require("./_lib/memory");
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
