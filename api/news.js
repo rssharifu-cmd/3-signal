@@ -16,7 +16,8 @@
  *   YOUTUBE_API_KEY
  */
 
-const TAVILY_URL  = "https://api.tavily.com/search";
+const { searchWeb, fetchRssFeed, searchReddit } = require("./_lib/research");
+
 const YOUTUBE_URL = "https://www.googleapis.com/youtube/v3/search";
 const TIMEOUT_MS  = 20000;
 
@@ -39,52 +40,27 @@ function withTimeout(promise, ms) {
   ]);
 }
 
-// ── TAVILY — AI-powered news search ──────────────────────────────────────────
+// ── TAVILY — AI-powered news search (delegated to research layer) ─────────────
 async function fetchTavilyNews(topics, avoid, apiKey) {
   const query = topics
     ? `Latest news: ${topics}`
     : "Top news today technology business";
 
-  try {
-    const res = await withTimeout(
-      fetch(TAVILY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          api_key: apiKey,
-          query,
-          search_depth: "advanced",
-          include_answer: false,
-          include_raw_content: false,
-          max_results: 6,
-          exclude_domains: avoid
-            ? avoid.split(",").map(s => s.trim()).filter(Boolean)
-            : [],
-        }),
-      }),
-      TIMEOUT_MS
-    );
+  const excludeDomains = avoid
+    ? avoid.split(",").map(s => s.trim()).filter(Boolean)
+    : [];
 
-    if (!res.ok) {
-      console.warn("Tavily error:", res.status);
-      return [];
-    }
-
-    const data = await res.json();
-    return (data.results || []).map(r => ({
-      source: "tavily",
-      title: r.title || "",
-      url: r.url || "",
-      snippet: (r.content || r.snippet || "").slice(0, 400),
-      published: r.published_date || "",
-    }));
-  } catch (e) {
-    console.warn("Tavily fetch failed:", e.message);
-    return [];
-  }
+  return searchWeb({
+    query,
+    topic: "news",
+    maxResults: 6,
+    excludeDomains,
+    apiKey,
+    timeoutMs: TIMEOUT_MS,
+  });
 }
 
-// ── RSS FEEDS — trusted news sources ─────────────────────────────────────────
+// ── RSS FEEDS — trusted news sources (delegated to research layer) ────────────
 async function fetchRSSFeeds(topics) {
   const topicsLower = (topics || "").toLowerCase();
 
@@ -105,45 +81,14 @@ async function fetchRSSFeeds(topics) {
     if (keys.some(k => topicsLower.includes(k))) { feedUrl = url; break; }
   }
 
-  try {
-    const res = await withTimeout(
-      fetch(feedUrl, { headers: { "User-Agent": "Signal-NewsDigest/1.0" } }),
-      TIMEOUT_MS
-    );
-    if (!res.ok) return [];
-
-    const xml = await res.text();
-    const items = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-
-    while ((match = itemRegex.exec(xml)) !== null && items.length < 4) {
-      const block = match[1];
-      const title   = (/<title><!\[CDATA\[(.*?)\]\]><\/title>/.exec(block)
-                    || /<title>(.*?)<\/title>/.exec(block) || [])[1] || "";
-      const link    = (/<link>(.*?)<\/link>/.exec(block) || [])[1] || "";
-      const desc    = (/<description><!\[CDATA\[(.*?)\]\]><\/description>/.exec(block)
-                    || /<description>(.*?)<\/description>/.exec(block) || [])[1] || "";
-      const pubDate = (/<pubDate>(.*?)<\/pubDate>/.exec(block) || [])[1] || "";
-
-      if (title && link) {
-        items.push({
-          source: "rss",
-          title: title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").trim(),
-          url: link.trim(),
-          snippet: desc.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").slice(0, 300).trim(),
-          published: pubDate,
-        });
-      }
-    }
-    return items;
-  } catch (e) {
-    console.warn("RSS fetch failed:", e.message);
-    return [];
-  }
+  return fetchRssFeed({
+    url: feedUrl,
+    maxItems: 4,
+    timeoutMs: TIMEOUT_MS,
+  });
 }
 
-// ── REDDIT — community buzz (free, no key) ────────────────────────────────────
+// ── REDDIT — community buzz (delegated to research layer) ─────────────────────
 async function fetchRedditPosts(topics) {
   const topicsLower = (topics || "").toLowerCase();
 
@@ -171,35 +116,11 @@ async function fetchRedditPosts(topics) {
     if (topicsLower.includes(key)) { subreddit = sub; break; }
   }
 
-  try {
-    const res = await withTimeout(
-      fetch(`https://www.reddit.com/r/${subreddit}/hot.json?limit=8`, {
-        headers: { "User-Agent": "Signal-NewsDigest/1.0" },
-      }),
-      TIMEOUT_MS
-    );
-    if (!res.ok) return [];
-
-    const data = await res.json();
-    const posts = (data?.data?.children || [])
-      .filter(p => !p.data?.stickied && !p.data?.over_18)
-      .slice(0, 4);
-
-    return posts.map(p => ({
-      source: "reddit",
-      title: p.data?.title || "",
-      url: `https://reddit.com${p.data?.permalink || ""}`,
-      snippet: p.data?.selftext
-        ? p.data.selftext.slice(0, 250)
-        : `${p.data?.ups || 0} upvotes · r/${p.data?.subreddit}`,
-      published: p.data?.created_utc
-        ? new Date(p.data.created_utc * 1000).toISOString()
-        : "",
-    }));
-  } catch (e) {
-    console.warn("Reddit fetch failed:", e.message);
-    return [];
-  }
+  return searchReddit({
+    subreddit,
+    limit: 4,
+    timeoutMs: TIMEOUT_MS,
+  });
 }
 
 // ── YOUTUBE — 1 relevant video ────────────────────────────────────────────────
