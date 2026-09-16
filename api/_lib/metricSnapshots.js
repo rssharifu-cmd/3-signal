@@ -413,6 +413,21 @@ function aggregateDimensions(slice) {
 }
 
 /**
+ * Calculates the number of calendar days between two YYYY-MM-DD dates inclusive.
+ *
+ * @param {string} startStr
+ * @param {string} endStr
+ * @returns {number}
+ */
+function getCalendarDaysInclusive(startStr, endStr) {
+  if (!startStr || !endStr) return 0;
+  const start = new Date(`${startStr}T00:00:00Z`);
+  const end = new Date(`${endStr}T00:00:00Z`);
+  const diffTime = Math.abs(end.getTime() - start.getTime());
+  return Math.round(diffTime / (24 * 60 * 60 * 1000)) + 1;
+}
+
+/**
  * Builds comparison window data comparing a current period to its prior equivalent.
  *
  * @param {Array<object>} allSnapshots
@@ -440,10 +455,27 @@ function buildWindow(allSnapshots, currStart, currEnd, priorStart, priorEnd, win
     metrics: s.metrics || {},
   }));
 
+  const currentCalendarDays = getCalendarDaysInclusive(currStart, currEnd);
+  const priorCalendarDays = getCalendarDaysInclusive(priorStart, priorEnd);
+
   return {
     window: windowName,
-    currentRange: { start: currStart, end: currEnd, days: currentSlice.length },
-    priorRange: { start: priorStart, end: priorEnd, days: priorSlice.length },
+    currentRange: {
+      start: currStart,
+      end: currEnd,
+      days: currentCalendarDays,
+      daysInRange: currentCalendarDays,
+      snapshotsFoundInRange: currentSlice.length,
+      snapshotsCount: currentSlice.length,
+    },
+    priorRange: {
+      start: priorStart,
+      end: priorEnd,
+      days: priorCalendarDays,
+      daysInRange: priorCalendarDays,
+      snapshotsFoundInRange: priorSlice.length,
+      snapshotsCount: priorSlice.length,
+    },
     currentMetrics,
     priorMetrics,
     changes,
@@ -550,4 +582,6 @@ module.exports = {
   loadComparisonWindows,
   shiftDate,
   aggregateMetrics,
+  buildWindow,
+  getCalendarDaysInclusive,
 };

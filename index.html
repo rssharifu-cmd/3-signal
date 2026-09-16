@@ -500,9 +500,12 @@
 
         <div class="dash-grid">
           <div class="dash-card span-2">
-            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
               <h3>Latest intelligence</h3>
-              <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this digest ✉️</button>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn btn-primary btn-sm" id="btn-check-website" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
+                <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this digest ✉️</button>
+              </div>
             </div>
             <div class="digest-panel">
               <div id="digest-output" class="digest-content empty">Loading…</div>
@@ -685,12 +688,15 @@
 
       <!-- Digest panel -->
       <div class="dash-panel hidden" id="panel-digest">
-        <div class="dash-header">
-          <h1>Today's digest</h1>
-          <p>Regenerate anytime — each run uses fresh live sources.</p>
+        <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h1>Today's digest</h1>
+            <p>Audit anytime — each run analyzes fresh live metrics across your connected data sources.</p>
+          </div>
+          <button class="btn btn-primary btn-sm" id="btn-generate-digest-full" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
         </div>
         <div class="dash-card">
-          <div id="digest-output-full" class="digest-content empty">Use Generate to load your brief.</div>
+          <div id="digest-output-full" class="digest-content empty">Click "Check my website now" to run your audit.</div>
           <p class="source-badge" id="digest-source-note-full"></p>
         </div>
       </div>

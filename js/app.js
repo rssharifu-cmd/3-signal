@@ -11,6 +11,7 @@ const STORAGE = {
   token: "signal_jwt_token",
   lastDigest: "signal_last_digest",
   lastDigestDate: "signal_last_digest_date",
+  lastWatchdogReport: "signal_last_watchdog_report",
   emailDigest: "signal_email_digest_on",
 };
 
@@ -1189,59 +1190,282 @@ async function submitFeedback(topic, sentiment, storyTitle, btn) {
   }
 }
 
+function renderWatchdogReportHtml(report) {
+  if (!report) return "";
+  const intel = report.intelligence || {};
+  const status = (intel.status || report.status || "normal").toLowerCase();
+  const headline = intel.headline || "Website Watchdog Scan Complete";
+  const summary = intel.summary || "";
+  const findings = Array.isArray(intel.priorityRankedFindings) ? intel.priorityRankedFindings : [];
+  const actions = Array.isArray(intel.recommendedActions) ? intel.recommendedActions : [];
+
+  let statusBadgeClass = "green";
+  let statusLabel = "All systems normal";
+  if (status === "critical") {
+    statusBadgeClass = "red";
+    statusLabel = "Critical Attention Needed";
+  } else if (status === "warning") {
+    statusBadgeClass = "amber";
+    statusLabel = "Warning · Metric Shift";
+  } else if (status === "opportunity") {
+    statusBadgeClass = "blue";
+    statusLabel = "Growth Opportunity";
+  }
+
+  let html = `
+    <div class="watchdog-report-view">
+      <div class="watchdog-report-header" style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <span class="watchdog-badge watchdog-badge-${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
+          ${report.targetDate ? `<span style="font-size:12px;color:var(--dim);">Target date: ${escapeHtml(report.targetDate)}</span>` : ""}
+        </div>
+        <h2 style="font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.35;margin-bottom:8px;">${escapeHtml(headline)}</h2>
+        ${summary ? `<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0;">${escapeHtml(summary)}</p>` : ""}
+      </div>
+  `;
+
+  // 1. Priority-Ranked Findings
+  if (findings.length > 0) {
+    html += `
+      <div class="watchdog-findings-section" style="margin-bottom:18px;">
+        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Priority-Ranked Findings (${findings.length})</h4>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+    `;
+
+    findings.forEach((f, idx) => {
+      const rank = f.priorityRank || (idx + 1);
+      const badgeText = f.priorityBadge || `P${rank}`;
+      const title = f.title || f.type || "Observation";
+      const primaryCause = f.primaryCause || "";
+      const plausibleCauses = Array.isArray(f.plausibleCauses) ? f.plausibleCauses : [];
+      const impact = f.impactAssessment || "";
+      const evContext = f.originalEvidence?.context || f.evidence?.context || "";
+      const itemActions = Array.isArray(f.recommendedActions) ? f.recommendedActions : [];
+
+      let badgeBg = "var(--surface-2)";
+      let badgeColor = "var(--muted)";
+      if (f.severity === "critical" || badgeText.includes("P1") || badgeText.includes("Immediate")) {
+        badgeBg = "#FEE2E2";
+        badgeColor = "#DC2626";
+      } else if (f.severity === "warning" || badgeText.includes("P2") || badgeText.includes("High")) {
+        badgeBg = "#FEF3C7";
+        badgeColor = "#D97706";
+      } else if (f.severity === "opportunity" || badgeText.includes("Opportunity")) {
+        badgeBg = "#EFF6FF";
+        badgeColor = "#2563EB";
+      }
+
+      html += `
+        <div class="watchdog-finding-card">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeText)}</span>
+            <strong style="font-size:14px;color:var(--text);">${escapeHtml(title)}</strong>
+          </div>
+          ${evContext ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;background:var(--surface);padding:8px 12px;border-radius:6px;border:1px solid var(--border);">${escapeHtml(evContext)}</div>` : ""}
+          ${primaryCause ? `<p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:6px;"><strong>Probable root cause:</strong> ${escapeHtml(primaryCause)}</p>` : ""}
+          ${plausibleCauses.length > 1 ? `
+            <details style="font-size:12px;color:var(--dim);margin-bottom:8px;cursor:pointer;">
+              <summary style="font-weight:600;color:var(--muted);margin-bottom:4px;">Alternative plausible factors (${plausibleCauses.length})</summary>
+              <ul style="padding-left:18px;margin:4px 0;">
+                ${plausibleCauses.map((c) => `<li style="margin-bottom:2px;">${escapeHtml(c)}</li>`).join("")}
+              </ul>
+            </details>
+          ` : ""}
+          ${impact ? `<p style="font-size:12px;color:var(--muted);margin-bottom:8px;"><strong>Impact:</strong> ${escapeHtml(impact)}</p>` : ""}
+          ${itemActions.length > 0 ? `
+            <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+              <span style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--dim);letter-spacing:0.05em;">Recommended resolution:</span>
+              <ul style="margin:4px 0 0 0;padding-left:18px;font-size:13px;color:var(--text);line-height:1.45;">
+                ${itemActions.map((a) => {
+                  if (typeof a === "string") return `<li>${escapeHtml(a)}</li>`;
+                  const urg = a.urgency ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:#F1F5F9;color:var(--muted);margin-right:4px;">${escapeHtml(a.urgency)}</span>` : "";
+                  return `<li style="margin-bottom:4px;">${urg}<strong>${escapeHtml(a.action || "")}</strong>${a.detail ? `<div style="font-size:12px;color:var(--muted);margin-top:2px;">${escapeHtml(a.detail)}</div>` : ""}</li>`;
+                }).join("")}
+              </ul>
+            </div>
+          ` : ""}
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+      </div>
+    `;
+  } else {
+    // Normal / all clear state
+    html += `
+      <div style="background:var(--green-soft);border:1px solid #A7F3D0;border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <span style="color:var(--green);font-size:16px;">✓</span>
+          <strong style="color:var(--green);font-size:14px;">No critical anomalies detected</strong>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">All traffic sources, query positions, and conversion milestones are tracking within baseline noise boundaries.</p>
+      </div>
+    `;
+  }
+
+  // 2. Recommended Actions
+  if (actions.length > 0) {
+    html += `
+      <div class="watchdog-actions-section" style="margin-bottom:12px;">
+        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:8px;">Recommended Actions</h4>
+        <ol style="margin:0;padding-left:20px;font-size:13px;color:var(--text);line-height:1.6;">
+    `;
+    actions.forEach((act) => {
+      if (typeof act === "string") {
+        html += `<li style="margin-bottom:6px;">${escapeHtml(act)}</li>`;
+      } else if (typeof act === "object" && act.action) {
+        html += `<li style="margin-bottom:6px;"><strong>${escapeHtml(act.action)}</strong>${act.detail ? ` — <span style="color:var(--muted);">${escapeHtml(act.detail)}</span>` : ""}</li>`;
+      }
+    });
+    html += `
+        </ol>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function renderWatchdogReport(report) {
+  const el = document.getElementById("digest-output");
+  const note = document.getElementById("digest-source-note");
+  if (!el || !report) return;
+
+  el.className = "digest-content";
+  el.innerHTML = renderWatchdogReportHtml(report);
+
+  if (note) {
+    const aiSkipped = report.intelligence?.aiCallSkipped;
+    const model = report.intelligence?.modelUsed || "Watchdog Heuristics";
+    const findingsCount = report.findingsCount ?? (report.findings?.length || 0);
+    if (aiSkipped) {
+      note.textContent = `Scanned GSC, GA4 & Bing · Zero anomalies detected · ${report.targetDate || "Today"}`;
+    } else {
+      note.textContent = `${findingsCount} findings analyzed with ${model} · ${report.targetDate || "Today"}`;
+    }
+  }
+
+  // Set plain-text summary for email fallback
+  const intel = report.intelligence || {};
+  const actionsList = (intel.recommendedActions || []).map((a) => `- ${typeof a === 'string' ? a : a.action}`).join('\n');
+  window._lastDigestContent = `${intel.headline || "Website Watchdog Report"}\n\n${intel.summary || ""}\n\nRecommended Actions:\n${actionsList}`;
+
+  syncDigestPanels();
+}
+
 function renderCachedDigest() {
   const el = document.getElementById("digest-output");
   const note = document.getElementById("digest-source-note");
-  const content = localStorage.getItem(STORAGE.lastDigest);
-  const date = localStorage.getItem(STORAGE.lastDigestDate);
+  if (!el) return;
 
-  if (content && date === new Date().toISOString().split("T")[0]) {
-    el.className = "digest-content";
-    setDigestContent(el, content);
-    note.textContent = `Last generated today`;
-  } else if (content) {
-    el.className = "digest-content";
-    setDigestContent(el, content);
-    note.textContent = `Cached from ${date}`;
-  } else {
-    el.className = "digest-content empty";
-    el.innerHTML = `
-      <div style="padding:14px 4px;">
-        <p style="margin:0 0 6px;font-weight:600;color:var(--text);font-size:14px;">No monitoring reports yet</p>
-        <p style="margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5;">Your website profile and monitoring configuration are saved. Actual Watchdog alerts will begin after data sources are connected.</p>
-        <button class="btn btn-secondary btn-sm" id="btn-generate-digest" onclick="generateDashboardDigest(false)">Generate news brief ↻</button>
-      </div>
-    `;
-    note.textContent = "";
+  const rawSavedReport = localStorage.getItem(STORAGE.lastWatchdogReport);
+  let savedReport = null;
+  if (rawSavedReport) {
+    try {
+      savedReport = JSON.parse(rawSavedReport);
+    } catch {}
   }
+
+  if (savedReport && savedReport.intelligence) {
+    renderWatchdogReport(savedReport);
+    return;
+  }
+
+  const legacyContent = localStorage.getItem(STORAGE.lastDigest);
+  const date = localStorage.getItem(STORAGE.lastDigestDate);
+  if (legacyContent && typeof legacyContent === "string" && !legacyContent.startsWith("{")) {
+    el.className = "digest-content";
+    setDigestContent(el, legacyContent);
+    if (note) note.textContent = date ? `Cached from ${date}` : "Cached";
+    syncDigestPanels();
+    return;
+  }
+
+  el.className = "digest-content empty";
+  el.innerHTML = `
+    <div style="padding:14px 4px;">
+      <p style="margin:0 0 6px;font-weight:600;color:var(--text);font-size:14px;">No monitoring reports yet</p>
+      <p style="margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5;">Your website profile and monitoring configuration are saved. Click below to run your real-time website audit.</p>
+      <button class="btn btn-primary btn-sm" id="btn-generate-digest" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
+    </div>
+  `;
+  if (note) note.textContent = "";
   syncDigestPanels();
+
+  fetchLatestReportIfAvailable();
+}
+
+async function fetchLatestReportIfAvailable() {
+  try {
+    const headers = authHeaders();
+    if (!headers.Authorization) return;
+    const res = await fetch("/api/watchdog?viewLatest=true", {
+      headers,
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    if (data.ok && data.report && data.report.intelligence) {
+      renderWatchdogReport(data.report);
+      localStorage.setItem(STORAGE.lastWatchdogReport, JSON.stringify(data.report));
+    }
+  } catch {}
 }
 
 async function generateDashboardDigest(auto = false) {
   const el = document.getElementById("digest-output");
   const note = document.getElementById("digest-source-note");
   const btn = document.getElementById("btn-generate-digest");
+  const btnCheck = document.getElementById("btn-check-website");
+  const btnFull = document.getElementById("btn-generate-digest-full");
 
   el.className = "digest-status";
-  el.innerHTML = `<div class="spinner"></div><span>Fetching sources and writing your digest…</span>`;
+  el.innerHTML = `<div class="spinner"></div><span>Checking website performance and analyzing metrics…</span>`;
   if (btn) btn.disabled = true;
+  if (btnCheck) btnCheck.disabled = true;
+  if (btnFull) btnFull.disabled = true;
 
   try {
-    const { content, sourceNote } = await fetchPersonalizedDigest({ showToastOnFetch: !auto });
-    el.className = "digest-content";
-    setDigestContent(el, content);
-    note.textContent = sourceNote;
-    window._lastDigestContent = content;
-    syncDigestPanels();
-    if (!auto) toast("Digest ready — personalized from live sources");
+    const res = await fetch("/api/watchdog", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders(),
+      },
+      body: JSON.stringify({ action: "run" }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok || !data.report) {
+      const errorMsg = data?.error || (typeof data === "string" ? data : "");
+      throw new Error(errorMsg || "Failed to generate report");
+    }
+
+    const report = data.report;
+    renderWatchdogReport(report);
+    localStorage.setItem(STORAGE.lastWatchdogReport, JSON.stringify(report));
+    localStorage.setItem(STORAGE.lastDigestDate, new Date().toISOString().split("T")[0]);
+    if (!auto) toast("Watchdog check complete · Intelligence updated");
   } catch (e) {
+    console.error("Watchdog check error:", e);
+    const friendlyMsg = "We couldn't complete your check just now — please try again in a moment.";
     el.className = "digest-content empty";
-    el.textContent = e.message || "Could not generate digest.";
-    note.textContent = "";
+    el.innerHTML = `
+      <div style="padding:16px 4px;">
+        <p style="margin:0 0 6px;font-weight:600;color:var(--text);font-size:14px;">Notice</p>
+        <p style="margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5;">${friendlyMsg}</p>
+        <button class="btn btn-secondary btn-sm" id="btn-generate-digest" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
+      </div>
+    `;
+    if (note) note.textContent = "";
     syncDigestPanels();
-    toast(e.message || "Digest failed");
+    toast(friendlyMsg);
   } finally {
     if (btn) btn.disabled = false;
+    if (btnCheck) btnCheck.disabled = false;
+    if (btnFull) btnFull.disabled = false;
   }
 }
 

@@ -18,21 +18,58 @@ module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
 
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+
+  // 1. Require a valid authenticated session
   const authedEmail = extractEmail(req);
-
-  // Allow query param email / userId for testing or fallback to authenticated email
-  const targetUser =
-    req.query?.email ||
-    req.query?.userId ||
-    urlObj.searchParams.get("email") ||
-    urlObj.searchParams.get("userId") ||
-    authedEmail;
-
-  if (!targetUser) {
-    return res.status(400).json({
+  if (!authedEmail) {
+    return res.status(401).json({
       ok: false,
-      error: "Missing user identifier. Provide ?email=user@example.com or pass Authorization Bearer token.",
+      error: "Unauthorized: Missing or invalid JWT session token.",
     });
+  }
+
+  // 2. Authorize admin check
+  const rawAdminEmails = process.env.ADMIN_EMAILS || "";
+  const adminList = rawAdminEmails
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  const isUserAdmin = adminList.length > 0 && adminList.includes(authedEmail.toLowerCase());
+
+  // 3. Determine requested target user (if an explicit query or body param was provided)
+  const requestedEmail =
+    req.query?.email ||
+    urlObj.searchParams.get("email") ||
+    (req.body && req.body.email);
+  const requestedUserId =
+    req.query?.userId ||
+    urlObj.searchParams.get("userId") ||
+    (req.body && req.body.userId);
+
+  let targetUser = authedEmail;
+
+  if (requestedEmail) {
+    const isSelf = requestedEmail.trim().toLowerCase() === authedEmail.trim().toLowerCase();
+    if (!isSelf && !isUserAdmin) {
+      return res.status(403).json({
+        ok: false,
+        error: "Forbidden: You do not have permission to access another user's watchdog data.",
+      });
+    }
+    targetUser = isUserAdmin ? requestedEmail.trim() : authedEmail;
+  } else if (requestedUserId) {
+    if (!isUserAdmin) {
+      const db = await getDb();
+      const currentUser = await db.collection("users").findOne({ email: authedEmail.toLowerCase() });
+      const currentUserIdStr = currentUser?._id ? currentUser._id.toString() : null;
+      if (!currentUserIdStr || currentUserIdStr !== String(requestedUserId).trim()) {
+        return res.status(403).json({
+          ok: false,
+          error: "Forbidden: You do not have permission to access another user's watchdog data.",
+        });
+      }
+    }
+    targetUser = String(requestedUserId).trim();
   }
 
   const targetDate = req.query?.targetDate || urlObj.searchParams.get("targetDate") || undefined;
@@ -54,7 +91,10 @@ module.exports = async function handler(req, res) {
       if (viewLatestOnly) {
         const report = await db
           .collection("intelligence_reports")
-          .findOne({ userEmail: targetUser }, { sort: { targetDate: -1, generatedAt: -1 } });
+          .findOne(
+            { $or: [{ userEmail: targetUser }, { userId: targetUser }] },
+            { sort: { targetDate: -1, generatedAt: -1 } }
+          );
         if (report) {
           return res.status(200).json({ ok: true, report });
         }
