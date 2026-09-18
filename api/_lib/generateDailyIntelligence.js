@@ -5,7 +5,8 @@
  * Step 1: Fetches performance data from connected sources (GSC, GA4, Bing).
  * Step 2: Persists normalized snapshots into `metric_snapshots` & computes comparison windows.
  * Step 3: Executes deterministic anomaly detection (pure code, NO LLM).
- * Step 4: Executes AI interpretation layer (LLM explains & prioritizes flagged findings only).
+ * Step 4: Conditionally executes targeted external research if anomalies exist (Tavily, RSS, Reddit).
+ * Step 5: Executes AI interpretation layer (LLM explains & prioritizes flagged findings with evidence).
  *
  * Usable by scheduled background cron, CLI scripts, and on-demand dashboard "Run Now" triggers.
  */
@@ -22,6 +23,7 @@ const {
 } = require("./metricSnapshots");
 const { detectAnomalies } = require("./anomalies");
 const { interpretFindings } = require("./intelligence");
+const { searchWeb, fetchRssFeed, searchReddit, GOOGLE_SEARCH_CENTRAL_FEED } = require("./research");
 
 /**
  * Resolves a user document by userId (ObjectId or string) or email.
@@ -53,6 +55,129 @@ async function resolveUser(db, userIdOrEmail) {
 
   // Fallback email search
   return users.findOne({ email: userIdOrEmail });
+}
+
+/**
+ * Conditionally conducts targeted external research for verified anomalies.
+ * Strictly skipped if findings is empty.
+ * @param {object} params
+ * @param {Array<object>} params.findings
+ * @param {object} params.userProfile
+ * @param {string} params.websiteUrl
+ * @returns {Promise<Array<object>>} Normalized evidence array
+ */
+async function conductTargetedResearch({ findings = [], userProfile = {}, websiteUrl = "" }) {
+  if (!Array.isArray(findings) || findings.length === 0) {
+    return [];
+  }
+
+  // Check if there are search-related or ranking anomalies where external context is valuable
+  const searchRelatedFindings = findings.filter((f) =>
+    ["ranking_position_drop", "organic_traffic_drop", "ctr_opportunity"].includes(f.type)
+  );
+
+  if (searchRelatedFindings.length === 0) {
+    return [];
+  }
+
+  const externalEvidence = [];
+
+  try {
+    // 1. Check Google Search Central RSS for recent core updates or search announcements
+    try {
+      const feedItems = await fetchRssFeed({
+        feedUrl: GOOGLE_SEARCH_CENTRAL_FEED,
+        maxItems: 3,
+        timeoutMs: 8000,
+      });
+      if (Array.isArray(feedItems) && feedItems.length > 0) {
+        externalEvidence.push(...feedItems.map((item) => ({
+          ...item,
+          context: "Official Google Search Central announcement",
+        })));
+      }
+    } catch (rssErr) {
+      console.warn("[Watchdog Research RSS warning]:", rssErr.message);
+    }
+
+    // 2. Tavily Web Search if TAVILY_API_KEY is configured
+    if (process.env.TAVILY_API_KEY) {
+      // Find top affected query or keyword
+      const targetQueryFinding = searchRelatedFindings.find(
+        (f) => f.evidence?.query || f.evidence?.subject
+      );
+      const queryTerm = targetQueryFinding?.evidence?.query || targetQueryFinding?.evidence?.subject || "";
+
+      // Targeted web search for algorithm volatility or query SERP movement
+      const searchQuery = queryTerm
+        ? `Google search rankings algorithm update "${queryTerm}"`
+        : "Google search ranking volatility core update current";
+
+      try {
+        const webResults = await searchWeb({
+          query: searchQuery,
+          maxResults: 3,
+          days: 30,
+          timeoutMs: 10000,
+        });
+        if (Array.isArray(webResults)) {
+          externalEvidence.push(...webResults.map((item) => ({
+            ...item,
+            context: queryTerm ? `SERP context for "${queryTerm}"` : "Search volatility context",
+          })));
+        }
+      } catch (tavErr) {
+        console.warn("[Watchdog Research Tavily warning]:", tavErr.message);
+      }
+
+      // Competitor Research: If competitor URLs or domains are configured in user profile
+      const competitors = Array.isArray(userProfile?.competitorUrls) ? userProfile.competitorUrls : [];
+      if (competitors.length > 0 && queryTerm) {
+        const primaryCompetitor = competitors[0].replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+        if (primaryCompetitor) {
+          try {
+            const compResults = await searchWeb({
+              query: `${primaryCompetitor} ${queryTerm}`,
+              maxResults: 2,
+              timeoutMs: 8000,
+            });
+            if (Array.isArray(compResults)) {
+              externalEvidence.push(...compResults.map((item) => ({
+                ...item,
+                context: `Competitor SERP context (${primaryCompetitor})`,
+              })));
+            }
+          } catch (compErr) {
+            console.warn("[Watchdog Research Competitor warning]:", compErr.message);
+          }
+        }
+      }
+    }
+
+    // 3. Reddit SEO Community Search (Best-effort, safe timeout)
+    try {
+      const redditPosts = await searchReddit({
+        query: "Google search update ranking drop algorithm",
+        subreddit: "SEO",
+        limit: 2,
+        sort: "relevance",
+        time: "month",
+        timeoutMs: 6000,
+      });
+      if (Array.isArray(redditPosts) && redditPosts.length > 0) {
+        externalEvidence.push(...redditPosts.map((item) => ({
+          ...item,
+          context: "Community webmaster discussion (r/SEO)",
+        })));
+      }
+    } catch (redErr) {
+      console.warn("[Watchdog Research Reddit warning]:", redErr.message);
+    }
+  } catch (err) {
+    console.warn("[Watchdog Research General warning]:", err.message);
+  }
+
+  return externalEvidence.slice(0, 6);
 }
 
 /**
@@ -198,7 +323,19 @@ async function generateDailyIntelligence(userId, options = {}) {
     targetDate,
   });
 
-  // ── 5. AI INTERPRETATION LAYER (STEP 4) ───────────────────────────────────
+  // ── 5. CONDITIONAL TARGETED EXTERNAL RESEARCH (STEP 4) ────────────────────
+  // Strictly skipped if findings is empty
+  const websiteUrl = user.profile?.websiteUrl || activeSourcesWithProperty[0]?.selectedProperty?.url || "";
+  let externalResearch = [];
+  if (findings.length > 0) {
+    externalResearch = await conductTargetedResearch({
+      findings,
+      userProfile: user.profile || {},
+      websiteUrl,
+    });
+  }
+
+  // ── 6. AI INTERPRETATION LAYER (STEP 5) ───────────────────────────────────
   // The ONLY place an LLM is called. If findings is empty, AI call is skipped.
   const intelligence = await interpretFindings({
     findings,
@@ -207,12 +344,24 @@ async function generateDailyIntelligence(userId, options = {}) {
       email: userEmail,
       name: user.name || userEmail.split("@")[0],
       profile: user.profile || {},
+      websiteUrl,
     },
     comparisonWindows: comparisonWindowsByProvider,
+    externalResearch,
   });
 
-  // ── 6. COMPILE FINAL REPORT ───────────────────────────────────────────────
+  // ── 7. COMPILE FINAL REPORT ───────────────────────────────────────────────
   const reportId = new ObjectId();
+  const sourceEvidence = [
+    ...activeSourcesWithProperty.map((s) => {
+      if (s.provider === "google_search_console") return "Google Search Console (Verified organic search data)";
+      if (s.provider === "google_analytics") return "Google Analytics 4 (Verified traffic & conversion data)";
+      if (s.provider === "bing_webmaster" || s.provider === "bing") return "Bing Webmaster Tools (Verified search indexing data)";
+      return s.provider;
+    }),
+    ...(externalResearch.length > 0 ? ["External Research Layer (Official Search Central, community webmaster reports)"] : []),
+  ];
+
   const report = {
     reportId: String(reportId),
     userId: stringUserId,
@@ -220,7 +369,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     userName: user.name || userEmail.split("@")[0],
     targetDate,
     generatedAt: now,
-    websiteUrl: user.profile?.websiteUrl || activeSourcesWithProperty[0]?.selectedProperty?.url || "",
+    websiteUrl,
     activeSources: activeSourcesWithProperty.map((s) => ({
       provider: s.provider,
       propertyId: s.selectedProperty.id,
@@ -236,11 +385,13 @@ async function generateDailyIntelligence(userId, options = {}) {
     comparisonWindows: comparisonWindowsByProvider,
     findingsCount: findings.length,
     findings,
+    externalResearch,
     intelligence,
+    sourceEvidence,
     status: intelligence.status || "stable",
   };
 
-  // ── 7. PERSIST REPORT TO MONGODB ──────────────────────────────────────────
+  // ── 8. PERSIST REPORT TO MONGODB ──────────────────────────────────────────
   if (!options.dryRun) {
     const reportsCol = db.collection("intelligence_reports");
     await reportsCol.updateOne(

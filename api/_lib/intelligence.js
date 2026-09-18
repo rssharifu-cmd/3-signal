@@ -9,6 +9,7 @@
  * 2. Priority ranking (P1-P4)
  * 3. 1-3 concrete recommended actions per finding
  * 4. Executive summary
+ * 5. External research context integration (Tavily, RSS, Reddit)
  *
  * CRITICAL DIRECTIVE:
  * - If the findings array is empty, SKIP the AI call entirely and return
@@ -37,9 +38,10 @@ const FIXED_ALL_CLEAR = {
  * or the AI service experiences temporary connectivity issues.
  * @param {Array<object>} findings
  * @param {object} userContext
+ * @param {Array<object>} [externalResearch]
  * @returns {object}
  */
-function buildDeterministicInterpretation(findings, userContext) {
+function buildDeterministicInterpretation(findings, userContext, externalResearch = []) {
   const ranked = findings.map((f, idx) => {
     let priorityBadge = "P3 · Medium";
     let priorityRank = idx + 1;
@@ -99,54 +101,52 @@ function buildDeterministicInterpretation(findings, userContext) {
         "Meta description does not directly address searcher intent",
         "Rich snippets or featured snippets pushing standard organic clicks down",
       ];
-      primaryCause = "Underperforming SERP snippet copy relative to ranking position";
+      primaryCause = "High impression visibility with lower than expected click-through rate";
       recommendedActions = [
         {
-          action: "Rewrite title tag to include a clear benefit and primary keyword",
-          detail: "Keep length under 60 characters to prevent SERP truncation.",
-          urgency: "this_week",
-        },
-        {
-          action: "Add schema markup (FAQ, Product, or Article)",
-          detail: "Increase visual footprint in search results to win click share.",
-          urgency: "routine",
-        },
-      ];
-    } else if (f.type === "conversion_drop") {
-      plausibleCauses = [
-        "Broken checkout, sign-up form, or call-to-action button",
-        "Analytics event tag misconfigured or removed during a site update",
-        "Page speed regression causing visitor drop-off before completing goal",
-      ];
-      primaryCause = "Conversion funnel barrier or event tracking failure";
-      recommendedActions = [
-        {
-          action: "Test conversion flows manually in incognito mode",
-          detail: "Submit test forms and complete the checkout funnel to confirm no errors occur.",
-          urgency: "immediate",
-        },
-        {
-          action: "Verify tag triggers in Google Tag Manager / GA4 Realtime",
-          detail: "Ensure key conversion events are firing properly upon completion.",
+          action: "Rewrite title tag and meta description for higher click intent",
+          detail: "Frontload primary keyword and include a clear differentiator or outcome.",
           urgency: "immediate",
         },
       ];
     } else if (f.type === "new_page_traction") {
       plausibleCauses = [
-        "New content successfully indexed and ranking for relevant search intents",
-        "Social or external link referral driving organic discovery",
+        "Search engine has discovered and begun testing this URL for relevant queries",
+        "Fresh backlink or social mention generated initial authority boost",
       ];
-      primaryCause = "Emerging organic keyword footprint";
+      primaryCause = "Emerging search visibility on new or updated content";
       recommendedActions = [
         {
-          action: "Add internal links to this emerging page from your homepage or navigation",
-          detail: "Help search engines crawl and solidify rankings for this gaining URL.",
+          action: "Add contextual internal links to this emerging page from relevant cornerstone pages",
+          detail: "Reinforce authority to sustain and accelerate keyword rankings.",
           urgency: "this_week",
         },
       ];
+    } else if (f.type === "conversion_drop") {
+      plausibleCauses = [
+        "Checkout, lead form, or CTA tracking tag failure in Google Analytics 4",
+        "Form submission script error or broken button following recent site update",
+        "Page speed regression on high-converting mobile templates",
+      ];
+      primaryCause = "Tracking failure or user conversion path friction";
+      recommendedActions = [
+        {
+          action: "Submit a live test conversion in GA4 DebugView",
+          detail: "Confirm key conversion events (e.g. generate_lead, purchase) are registering in real time.",
+          urgency: "immediate",
+        },
+        {
+          action: "Test form functionality and mobile responsiveness across devices",
+          detail: "Ensure no JavaScript errors prevent visitors from completing checkout or lead capture.",
+          urgency: "immediate",
+        },
+      ];
     } else {
-      plausibleCauses = ["Channel attribution shift or tracking parameter changes"];
-      primaryCause = "Traffic mix reallocation";
+      plausibleCauses = [
+        "Traffic redistribution across channels or external platform changes",
+        "Measurement variance or attribution window shift",
+      ];
+      primaryCause = "Audience acquisition channel variance";
       recommendedActions = [
         {
           action: "Review referral sources and campaign tags",
@@ -180,6 +180,7 @@ function buildDeterministicInterpretation(findings, userContext) {
     summary: `Watchdog identified ${criticalCount} critical and ${warningCount} notable changes requiring attention. Focus on high-priority ranking and traffic signals first.`,
     priorityRankedFindings: ranked,
     recommendedActions: ranked.flatMap((r) => r.recommendedActions.map((a) => a.action)).slice(0, 3),
+    externalResearch: externalResearch || [],
     interpretedAt: new Date(),
     aiCallSkipped: false,
     usedFallback: true,
@@ -187,15 +188,16 @@ function buildDeterministicInterpretation(findings, userContext) {
 }
 
 /**
- * Interprets a verified findings array using Gemini 2.5 Flash via @google/genai.
+ * Interprets a verified findings array using Gemini Flash via @google/genai.
  *
  * @param {object} params
  * @param {Array<object>} params.findings - Deterministically flagged findings
  * @param {object} [params.userContext] - User profile and website details
  * @param {object} [params.comparisonWindows] - Historical window metrics
+ * @param {Array<object>} [params.externalResearch] - External research items (Tavily, RSS, Reddit)
  * @returns {Promise<object>} Structured interpretation report
  */
-async function interpretFindings({ findings = [], userContext = {}, comparisonWindows = {} }) {
+async function interpretFindings({ findings = [], userContext = {}, comparisonWindows = {}, externalResearch = [] }) {
   // ── STEP 1: ZERO FINDINGS SHORT-CIRCUIT ───────────────────────────────────
   // Strictly avoid calling the LLM if nothing was flagged by code
   if (!Array.isArray(findings) || findings.length === 0) {
@@ -209,7 +211,7 @@ async function interpretFindings({ findings = [], userContext = {}, comparisonWi
   const apiKey = (process.env.GEMINI_API_KEY || "").trim();
   if (!apiKey) {
     console.warn("[Intelligence] GEMINI_API_KEY not configured. Using deterministic fallback.");
-    return buildDeterministicInterpretation(findings, userContext);
+    return buildDeterministicInterpretation(findings, userContext, externalResearch);
   }
 
   // ── STEP 3: CALL GEMINI API ───────────────────────────────────────────────
@@ -236,6 +238,11 @@ User Priorities: ${JSON.stringify(userContext.profile?.monitoringPriorities || [
 
 Verified Code Findings to Interpret (${findings.length} total):
 ${JSON.stringify(findings, null, 2)}
+${externalResearch && externalResearch.length > 0 ? `
+External Research & Context (Official Search Central announcements, industry discussions, SERP volatility):
+${JSON.stringify(externalResearch, null, 2)}
+` : ""}
+If external research is provided, incorporate relevant external context (e.g. search updates, competitor movements, community reports) into plausibleCauses and impactAssessment where directly applicable. Never fabricate numbers or sources.
 
 Produce a JSON object matching this exact structure:
 {
@@ -287,11 +294,10 @@ Produce a JSON object matching this exact structure:
       });
     } catch (primaryErr) {
       console.warn("[Intelligence] gemini-3.6-flash primary attempt warning:", primaryErr.message);
-      // Fallback model attempt if primary is unavailable or 503
       try {
-        modelUsed = "gemini-3.8-flash";
+        modelUsed = "gemini-2.5-flash";
         response = await ai.models.generateContent({
-          model: "gemini-3.8-flash",
+          model: "gemini-2.5-flash",
           contents: prompt,
           config: {
             responseMimeType: "application/json",
@@ -328,6 +334,7 @@ Produce a JSON object matching this exact structure:
       summary: parsed.summary,
       priorityRankedFindings: parsed.priorityRankedFindings || [],
       recommendedActions: parsed.topThreeNextSteps || [],
+      externalResearch: externalResearch || [],
       interpretedAt: new Date(),
       aiCallSkipped: false,
       modelUsed,
@@ -335,7 +342,7 @@ Produce a JSON object matching this exact structure:
   } catch (err) {
     console.error("[Intelligence Error] Gemini interpretation failed:", err.message);
     // Fall back smoothly to deterministic interpretation
-    return buildDeterministicInterpretation(findings, userContext);
+    return buildDeterministicInterpretation(findings, userContext, externalResearch);
   }
 }
 

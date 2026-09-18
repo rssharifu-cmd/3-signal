@@ -15,7 +15,7 @@ const DEFAULT_MAX_ITEMS = 5;
 const MAX_ITEMS_CAP = 25;
 
 // Authoritative industry research feeds
-const GOOGLE_SEARCH_CENTRAL_FEED = "https://developers.google.com/search/blog/rss.xml";
+const GOOGLE_SEARCH_CENTRAL_FEED = "https://developers.google.com/search/blog/feed.xml";
 
 /**
  * Validates whether a given string is a valid HTTP/HTTPS URL.
@@ -176,15 +176,17 @@ function parseFeedXml(xml, feedUrl, limit) {
  */
 async function fetchRssFeed({
   url,
+  feedUrl,
   maxItems = DEFAULT_MAX_ITEMS,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 } = {}) {
+  const targetUrl = url || feedUrl;
   // 1. Validate feed URL
-  if (!isValidUrl(url)) {
-    console.warn(`[Research/RSS] Invalid feed URL provided: "${url}"`);
+  if (!isValidUrl(targetUrl)) {
+    console.warn(`[Research/RSS] Invalid feed URL provided: "${targetUrl}"`);
     return [];
   }
-  const cleanUrl = url.trim();
+  const cleanUrl = targetUrl.trim();
 
   // 2. Clamp limit
   const limit = Math.max(1, Math.min(Number(maxItems) || DEFAULT_MAX_ITEMS, MAX_ITEMS_CAP));

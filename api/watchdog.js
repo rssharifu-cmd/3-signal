@@ -3,8 +3,8 @@
  *
  * Route: /api/watchdog
  *
- * Allows reviewing and testing the Watchdog intelligence pipeline independently
- * without triggering emails or altering existing news digest features:
+ * Allows reviewing and testing the Watchdog intelligence pipeline on demand
+ * or viewing the latest generated intelligence report:
  *
  * GET  /api/watchdog?email=user@example.com&skipFetch=true
  * POST /api/watchdog { action: "run", userId: "...", targetDate: "YYYY-MM-DD" }

@@ -789,122 +789,14 @@ function digestLengthToTone(length) {
 
 function buildProfileSummaryText(form) {
   return [
-    `Role: ${form.profession || "—"}`,
-    `Goal: ${form.goals || "—"}`,
-    `Topics: ${form.topics || "—"}`,
-    `Language: ${form.language || "English"}`,
-    `Country: ${form.country || "—"}`,
-    `News scope: ${form.newsScope || "Mixed"}`,
-    `Digest length: ${form.digestLength || "Standard"}`,
-    form.avoid ? `Avoid: ${form.avoid}` : null,
-    form.customSources ? `Favorite sources: ${form.customSources}` : null,
+    `Website: ${form.websiteUrl || "—"}`,
+    `Type: ${form.websiteType || "—"}`,
+    `Purpose: ${form.websitePurpose || "—"}`,
+    `Monitoring: ${Array.isArray(form.monitoringPriorities) ? form.monitoringPriorities.join(", ") : (form.topics || "—")}`,
+    form.importantPages ? `Key Pages: ${Array.isArray(form.importantPages) ? form.importantPages.join(", ") : form.importantPages}` : null,
   ]
     .filter(Boolean)
     .join("\n");
-}
-
-async function apiChat(body) {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const raw = await res.text();
-  let data = {};
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    throw new Error(raw.slice(0, 180) || "Invalid JSON");
-  }
-  if (!res.ok) throw new Error(data.error || res.statusText || "Request failed");
-  if (["chat", "summary", "digest"].includes(body.action)) {
-    if (typeof data.content !== "string" || !data.content.trim()) {
-      throw new Error(data.error || "Empty reply from AI.");
-    }
-  }
-  return data;
-}
-
-async function apiNews(form) {
-  const res = await fetch("/api/news", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      topics: form.topics || "technology, AI",
-      profession: form.profession || "",
-      avoid: form.avoid || "",
-    }),
-  });
-  const raw = await res.text();
-  let data = {};
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    throw new Error(raw.slice(0, 180) || "Invalid JSON");
-  }
-  if (!res.ok) throw new Error(data.error || "News fetch failed");
-  return data;
-}
-
-function buildNewsContext(news) {
-  if (!news?.ok) return "";
-  const t = news.text || {};
-  return [
-    "ARTICLES:",
-    t.articles || "None",
-    "",
-    "REDDIT:",
-    t.reddit || "None",
-    "",
-    "VIDEO:",
-    t.video || "None",
-  ].join("\n");
-}
-
-async function fetchPersonalizedDigest({ showToastOnFetch = false } = {}) {
-  const profileText = localStorage.getItem(STORAGE.profile) || "";
-  const form = getSavedForm();
-  const plan = localStorage.getItem(STORAGE.plan) || "starter";
-
-  let newsContext = "";
-  let sourceNote = "";
-
-  try {
-    if (showToastOnFetch) toast("Fetching live sources for your topics…");
-    const news = await apiNews(form);
-    newsContext = buildNewsContext(news);
-    const c = news.counts || {};
-    sourceNote = `${c.total || 0} items · Tavily ${c.tavily || 0} · RSS ${c.rss || 0} · Reddit ${c.reddit || 0}${c.video ? " · Video" : ""}`;
-    if (showToastOnFetch) toast("Personalizing your digest…");
-  } catch (e) {
-    console.warn("News fetch:", e.message);
-    sourceNote = "Profile-only (news API unavailable)";
-  }
-
-  const data = await apiChat({
-    action: "digest",
-    profile: {
-      narrative: profileText,
-      profession: form.profession,
-      goals: form.goals,
-      topics: form.topics,
-      avoid: form.avoid,
-      tone: form.tone,
-      language: form.language,
-      country: form.country,
-      newsScope: form.newsScope,
-      digestLength: form.digestLength,
-    },
-    memory: userMemory,
-    plan,
-    newsContext,
-  });
-
-  const today = new Date().toISOString().split("T")[0];
-  localStorage.setItem(STORAGE.lastDigest, data.content);
-  localStorage.setItem(STORAGE.lastDigestDate, today);
-
-  return { content: data.content, sourceNote };
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
@@ -1348,7 +1240,8 @@ function renderWatchdogReport(report) {
     }
   }
 
-  // Set plain-text summary for email fallback
+  // Set report reference and plain-text summary for email
+  window._lastWatchdogReport = report;
   const intel = report.intelligence || {};
   const actionsList = (intel.recommendedActions || []).map((a) => `- ${typeof a === 'string' ? a : a.action}`).join('\n');
   window._lastDigestContent = `${intel.headline || "Website Watchdog Report"}\n\n${intel.summary || ""}\n\nRecommended Actions:\n${actionsList}`;
@@ -1472,26 +1365,35 @@ async function generateDashboardDigest(auto = false) {
 async function sendDigestEmail() {
   const savedEmail = localStorage.getItem(STORAGE.email) || "";
   const form = getSavedForm();
-  const content = window._lastDigestContent || localStorage.getItem(STORAGE.lastDigest) || "";
-  if (!savedEmail || !content) {
-    toast("Sign in with email and generate a digest first.");
+  const rawSavedReport = localStorage.getItem(STORAGE.lastWatchdogReport);
+  let report = window._lastWatchdogReport || null;
+  if (!report && rawSavedReport) {
+    try { report = JSON.parse(rawSavedReport); } catch {}
+  }
+
+  if (!savedEmail) {
+    toast("Sign in with email first.");
     return;
   }
-  toast("Sending to " + savedEmail + "…");
+  if (!report) {
+    toast("Run a Watchdog website check first.");
+    return;
+  }
+  toast("Sending Watchdog report to " + savedEmail + "…");
   try {
     const res = await fetch("/api/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "digest",
+        action: "watchdog_report",
         email: savedEmail,
         name: form.name || "",
-        digestContent: content,
+        report,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Send failed");
-    toast("Digest emailed to " + savedEmail);
+    toast("Watchdog report emailed to " + savedEmail);
   } catch (e) {
     toast("Email failed: " + e.message);
   }

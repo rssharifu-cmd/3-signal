@@ -1,14 +1,14 @@
-name: Daily News Digest
+name: Sharflow Watchdog Scheduler
 
 on:
   schedule:
-    # Runs at 13:00 UTC (1:00 PM UTC) daily, matching previous vercel cron
+    # Runs daily at 13:00 UTC (morning US / afternoon EU)
     - cron: '0 13 * * *'
-  workflow_dispatch: # Allows manually triggering the run from GitHub UI
+  workflow_dispatch: # Allows manually triggering the run from GitHub Actions UI
 
 jobs:
-  send-digest:
-    name: Generate & Send Daily Digests
+  run-watchdog:
+    name: Run Website Watchdog Intelligence Cycle
     runs-on: ubuntu-latest
 
     steps:
@@ -18,19 +18,22 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Execute send-digests script
+      - name: Execute Watchdog Scheduler
         env:
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        run: node scripts/send-digests.js
+          OAUTH_TOKEN_ENCRYPTION_KEY: ${{ secrets.OAUTH_TOKEN_ENCRYPTION_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          BING_CLIENT_ID: ${{ secrets.BING_CLIENT_ID }}
+          BING_CLIENT_SECRET: ${{ secrets.BING_CLIENT_SECRET }}
+        run: node scripts/run-watchdog-scheduler.js

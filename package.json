@@ -1,8 +1,8 @@
 {
-  "name": "signal",
+  "name": "sharflow-website-watchdog",
   "private": true,
   "version": "1.0.0",
-  "description": "Sharflow — World's most personalized AI news digest",
+  "description": "Sharflow — AI Website Watchdog",
   "engines": {
     "node": ">=18"
   },
@@ -10,7 +10,7 @@
     "dev": "node server.js",
     "build": "echo 'No build phase needed for static web'",
     "start": "node server.js",
-    "lint": "node -c server.js api/_lib/cryptoUtils.js api/_lib/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js js/app.js"
+    "lint": "node -c server.js api/_lib/cryptoUtils.js api/_lib/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js api/watchdog.js api/send.js api/admin-status.js api/_lib/generateDailyIntelligence.js api/_lib/intelligence.js api/_lib/anomalies.js api/_lib/research/index.js scripts/run-watchdog-scheduler.js js/app.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

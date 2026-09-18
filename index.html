@@ -466,7 +466,7 @@
     <aside class="dash-sidebar">
       <button class="dash-nav-item active" data-panel="overview" onclick="dashNav('overview')">Overview</button>
       <button class="dash-nav-item" data-panel="sources" onclick="dashNav('sources')">Data Sources</button>
-      <button class="dash-nav-item" data-panel="digest" onclick="dashNav('digest')">Today's digest</button>
+      <button class="dash-nav-item" data-panel="digest" onclick="dashNav('digest')">Intelligence Report</button>
       <button class="dash-nav-item" data-panel="profile" onclick="dashNav('profile')">Profile</button>
     </aside>
 
@@ -504,7 +504,7 @@
               <h3>Latest intelligence</h3>
               <div style="display:flex;gap:8px;align-items:center;">
                 <button class="btn btn-primary btn-sm" id="btn-check-website" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
-                <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this digest ✉️</button>
+                <button class="btn btn-secondary btn-sm" id="btn-email-digest" onclick="sendDigestEmail()">Email me this report ✉️</button>
               </div>
             </div>
             <div class="digest-panel">
@@ -686,12 +686,12 @@
         </div>
       </div>
 
-      <!-- Digest panel -->
+      <!-- Intelligence Report panel -->
       <div class="dash-panel hidden" id="panel-digest">
         <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
-            <h1>Today's digest</h1>
-            <p>Audit anytime — each run analyzes fresh live metrics across your connected data sources.</p>
+            <h1>Intelligence Report</h1>
+            <p>On-demand audit — analyzes fresh live metrics across your connected data sources.</p>
           </div>
           <button class="btn btn-primary btn-sm" id="btn-generate-digest-full" onclick="generateDashboardDigest(false)">Check my website now ↻</button>
         </div>
