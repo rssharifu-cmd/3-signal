@@ -34,6 +34,116 @@ const FIXED_ALL_CLEAR = {
 };
 
 /**
+ * Generates an explicit "no sources connected" report state.
+ * @returns {object}
+ */
+function buildNoSourcesInterpretation() {
+  return {
+    status: "no_sources",
+    headline: "Monitoring not active · Connect a data source",
+    summary: "Watchdog cannot determine website health until at least one verified data source is connected. Connect Google Search Console, Google Analytics 4, or Bing Webmaster Tools to start monitoring organic traffic, search rankings, and conversions.",
+    priorityRankedFindings: [],
+    recommendedActions: [
+      {
+        action: "Connect Google Search Console",
+        detail: "Gain visibility into organic search clicks, impressions, CTR, and keyword position shifts.",
+        urgency: "immediate",
+      },
+      {
+        action: "Connect Google Analytics 4",
+        detail: "Monitor active visitor sessions, traffic channels, and key conversion milestones.",
+        urgency: "immediate",
+      },
+      {
+        action: "Connect Bing Webmaster Tools",
+        detail: "Track Bing search impressions, indexed pages, and crawl issues.",
+        urgency: "routine",
+      },
+    ],
+    interpretedAt: new Date(),
+    aiCallSkipped: true,
+  };
+}
+
+/**
+ * Generates an explicit "insufficient monitoring data" report state.
+ * @param {Array<object>} [unusableProviders]
+ * @returns {object}
+ */
+function buildInsufficientDataInterpretation(unusableProviders = []) {
+  const detailNotes = unusableProviders
+    .filter((p) => p.reason)
+    .map((p) => `${p.name || p.provider}: ${p.reason}`);
+
+  const detailSentence = detailNotes.length > 0
+    ? ` (${detailNotes.join("; ")})`
+    : "";
+
+  return {
+    status: "insufficient_data",
+    headline: "Insufficient monitoring data · Gathering baseline metrics",
+    summary: `Watchdog has connected data sources, but there is not yet enough usable comparison data to reliably evaluate website health${detailSentence}. Performance cannot be confirmed as normal until additional daily snapshots or baseline data are available.`,
+    priorityRankedFindings: [],
+    recommendedActions: [
+      {
+        action: "Verify tracking scripts & provider connections",
+        detail: "Ensure tracking tags on your website are active and OAuth provider permissions are granted.",
+        urgency: "immediate",
+      },
+      {
+        action: "Allow baseline history to accumulate",
+        detail: "Watchdog requires at least 2 consecutive sync days to build reliable 1d/7d comparison baselines.",
+        urgency: "routine",
+      },
+    ],
+    interpretedAt: new Date(),
+    aiCallSkipped: true,
+  };
+}
+
+/**
+ * Generates a normal-state interpretation that accurately respects which providers
+ * had valid data, and explicitly discloses any unavailable providers without claiming
+ * they are steady.
+ * @param {object} [params]
+ * @param {Array<object>} [params.usableProviders]
+ * @param {Array<object>} [params.unusableProviders]
+ * @returns {object}
+ */
+function buildNormalStateInterpretation({ usableProviders = [], unusableProviders = [] } = {}) {
+  if (Array.isArray(unusableProviders) && unusableProviders.length > 0) {
+    const usableNames = (usableProviders || []).map((p) => p.name || p.provider).filter(Boolean).join(", ") || "Active sources";
+    const unusableNotes = unusableProviders.map((p) => `${p.name || p.provider} (${p.reason || "unavailable"})`).join("; ");
+
+    return {
+      status: "stable",
+      headline: `All systems normal on active sources · ${usableNames}`,
+      summary: `${usableNames} metrics and search visibility remain steady within baseline boundaries. Note: ${unusableNotes}. Performance was not evaluated for unavailable providers.`,
+      priorityRankedFindings: [],
+      recommendedActions: [
+        {
+          action: "Continue regular monitoring on active sources",
+          detail: "Baseline traffic and rankings are steady across verified active channels.",
+          urgency: "routine",
+        },
+        ...unusableProviders.map((p) => ({
+          action: `Restore ${p.name || p.provider} connection`,
+          detail: `Provider sync issue: ${p.reason || "Unable to sync"}. Check OAuth connection in Data Sources.`,
+          urgency: "immediate",
+        })),
+      ],
+      interpretedAt: new Date(),
+      aiCallSkipped: true,
+    };
+  }
+
+  return {
+    ...FIXED_ALL_CLEAR,
+    interpretedAt: new Date(),
+  };
+}
+
+/**
  * Fallback deterministic interpreter in case GEMINI_API_KEY is not configured
  * or the AI service experiences temporary connectivity issues.
  * @param {Array<object>} findings
@@ -195,16 +305,22 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
  * @param {object} [params.userContext] - User profile and website details
  * @param {object} [params.comparisonWindows] - Historical window metrics
  * @param {Array<object>} [params.externalResearch] - External research items (Tavily, RSS, Reddit)
+ * @param {Array<object>} [params.usableProviders] - Providers with valid comparison data
+ * @param {Array<object>} [params.unusableProviders] - Providers that failed or lack baseline data
  * @returns {Promise<object>} Structured interpretation report
  */
-async function interpretFindings({ findings = [], userContext = {}, comparisonWindows = {}, externalResearch = [] }) {
+async function interpretFindings({
+  findings = [],
+  userContext = {},
+  comparisonWindows = {},
+  externalResearch = [],
+  usableProviders = [],
+  unusableProviders = [],
+}) {
   // ── STEP 1: ZERO FINDINGS SHORT-CIRCUIT ───────────────────────────────────
   // Strictly avoid calling the LLM if nothing was flagged by code
   if (!Array.isArray(findings) || findings.length === 0) {
-    return {
-      ...FIXED_ALL_CLEAR,
-      interpretedAt: new Date(),
-    };
+    return buildNormalStateInterpretation({ usableProviders, unusableProviders });
   }
 
   // ── STEP 2: CHECK FOR GEMINI API KEY ──────────────────────────────────────
@@ -349,5 +465,8 @@ Produce a JSON object matching this exact structure:
 module.exports = {
   interpretFindings,
   buildDeterministicInterpretation,
+  buildNoSourcesInterpretation,
+  buildInsufficientDataInterpretation,
+  buildNormalStateInterpretation,
   FIXED_ALL_CLEAR,
 };
