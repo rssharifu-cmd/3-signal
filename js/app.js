@@ -1085,7 +1085,10 @@ async function submitFeedback(topic, sentiment, storyTitle, btn) {
 function renderWatchdogReportHtml(report) {
   if (!report) return "";
   const intel = report.intelligence || {};
-  const status = (intel.status || report.status || "normal").toLowerCase();
+  const status = (intel.status || report.status || report.monitoringStatus || "normal").toLowerCase();
+  const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
+  const isNoSources = status === "no_sources" || monitoringStatus === "no_sources";
+  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
   const headline = intel.headline || "Website Watchdog Scan Complete";
   const summary = intel.summary || "";
   const findings = Array.isArray(intel.priorityRankedFindings) ? intel.priorityRankedFindings : [];
@@ -1093,7 +1096,13 @@ function renderWatchdogReportHtml(report) {
 
   let statusBadgeClass = "green";
   let statusLabel = "All systems normal";
-  if (status === "critical") {
+  if (isNoSources) {
+    statusBadgeClass = "amber";
+    statusLabel = "Monitoring Not Active";
+  } else if (isInsufficientData) {
+    statusBadgeClass = "amber";
+    statusLabel = "Insufficient Data · Baseline Pending";
+  } else if (status === "critical" || status === "critical_attention") {
     statusBadgeClass = "red";
     statusLabel = "Critical Attention Needed";
   } else if (status === "warning") {
@@ -1184,6 +1193,24 @@ function renderWatchdogReportHtml(report) {
         </div>
       </div>
     `;
+  } else if (isNoSources) {
+    html += `
+      <div style="background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <strong style="color:var(--amber-text);font-size:14px;">No connected data sources</strong>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">Watchdog cannot evaluate website health or detect issues without at least one connected data source. Connect Google Search Console, Google Analytics 4, or Bing Webmaster Tools to begin monitoring.</p>
+      </div>
+    `;
+  } else if (isInsufficientData) {
+    html += `
+      <div style="background:var(--amber-soft);border:1px solid var(--amber-border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:18px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+          <strong style="color:var(--amber-text);font-size:14px;">Insufficient monitoring baseline</strong>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">Not enough usable comparison data is available yet. Watchdog requires at least 2 consecutive daily snapshots to evaluate trend baselines and confirm normal website health.</p>
+      </div>
+    `;
   } else {
     // Normal / all clear state
     html += `
@@ -1233,8 +1260,14 @@ function renderWatchdogReport(report) {
     const aiSkipped = report.intelligence?.aiCallSkipped;
     const model = report.intelligence?.modelUsed || "Watchdog Heuristics";
     const findingsCount = report.findingsCount ?? (report.findings?.length || 0);
-    if (aiSkipped) {
-      note.textContent = `Scanned GSC, GA4 & Bing · Zero anomalies detected · ${report.targetDate || "Today"}`;
+    const status = (report.intelligence?.status || report.status || report.monitoringStatus || "").toLowerCase();
+    const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
+    if (status === "no_sources" || monitoringStatus === "no_sources") {
+      note.textContent = `Monitoring inactive · Connect data sources · ${report.targetDate || "Today"}`;
+    } else if (status === "insufficient_data" || monitoringStatus === "insufficient_data") {
+      note.textContent = `Awaiting comparison baselines · Sync in progress · ${report.targetDate || "Today"}`;
+    } else if (aiSkipped) {
+      note.textContent = `Scanned active sources · Zero anomalies detected · ${report.targetDate || "Today"}`;
     } else {
       note.textContent = `${findingsCount} findings analyzed with ${model} · ${report.targetDate || "Today"}`;
     }

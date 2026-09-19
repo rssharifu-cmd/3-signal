@@ -99,25 +99,90 @@ function welcomeHtml({ name, websiteUrl, profileSummary, email }) {
 </html>`;
 }
 
+// ── WATCHDOG EMAIL SUBJECT HELPER ─────────────────────────────────────────────
+function getWatchdogEmailSubject(report = {}) {
+  const status = report.status || report.intelligence?.status || "stable";
+  const monitoringStatus = report.monitoringStatus || (
+    status === "no_sources" ? "no_sources" : (status === "insufficient_data" ? "insufficient_data" : "active")
+  );
+  const website = report.websiteUrl || "your website";
+
+  if (status === "no_sources" || monitoringStatus === "no_sources") {
+    return "Sharflow Watchdog: Monitoring not active · Connect a data source";
+  }
+  if (status === "insufficient_data" || monitoringStatus === "insufficient_data") {
+    return `Sharflow Watchdog: Gathering baseline data for ${website}`;
+  }
+  const hasFindings = Array.isArray(report.findings) && report.findings.length > 0;
+  if (!hasFindings && status === "stable") {
+    return `Sharflow Watchdog: All systems normal on ${website}`;
+  }
+  return `Sharflow Alert: Website changes detected on ${website}`;
+}
+
 // ── WATCHDOG INTELLIGENCE REPORT EMAIL TEMPLATE ───────────────────────────────
 function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
   const firstName = name ? name.split(" ")[0] : "there";
   const displayDate = dateStr || report.targetDate || new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const websiteUrl = report.websiteUrl || "Your Monitored Website";
-  const isStable = report.status === "stable" || (!report.findings || report.findings.length === 0);
-  const statusColor = isStable ? "#16A34A" : (report.status === "critical_attention" ? "#DC2626" : "#D97706");
-  const statusBg = isStable ? "#DCFCE7" : (report.status === "critical_attention" ? "#FEE2E2" : "#FEF3C7");
-  const statusLabel = isStable ? "ALL SYSTEMS NORMAL" : "NEEDS ATTENTION";
 
-  const headline = escapeHtml(report.intelligence?.headline || (isStable ? "All systems normal · No significant website changes detected" : "Website changes detected requiring attention"));
-  const summary = escapeHtml(report.intelligence?.summary || (isStable ? "No significant organic traffic drops, ranking losses, or conversion anomalies were detected across your connected data sources. Website performance and search visibility remain steady." : "Watchdog identified notable changes across your connected website data sources."));
+  const status = report.status || report.intelligence?.status || "stable";
+  const monitoringStatus = report.monitoringStatus || (
+    status === "no_sources" ? "no_sources" : (status === "insufficient_data" ? "insufficient_data" : "active")
+  );
+  const isNoSources = status === "no_sources" || monitoringStatus === "no_sources";
+  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
+  const hasFindings = Array.isArray(report.findings) && report.findings.length > 0;
+  const isStable = !isNoSources && !isInsufficientData && !hasFindings;
+
+  let statusColor = "#16A34A";
+  let statusBg = "#DCFCE7";
+  let statusLabel = "ALL SYSTEMS NORMAL";
+
+  if (isNoSources) {
+    statusColor = "#D97706";
+    statusBg = "#FEF3C7";
+    statusLabel = "MONITORING NOT ACTIVE";
+  } else if (isInsufficientData) {
+    statusColor = "#D97706";
+    statusBg = "#FEF3C7";
+    statusLabel = "INSUFFICIENT DATA";
+  } else if (report.status === "critical_attention" || status === "critical") {
+    statusColor = "#DC2626";
+    statusBg = "#FEE2E2";
+    statusLabel = "CRITICAL ATTENTION";
+  } else if (hasFindings) {
+    statusColor = "#D97706";
+    statusBg = "#FEF3C7";
+    statusLabel = "NEEDS ATTENTION";
+  }
+
+  let fallbackHeadline = "Website changes detected requiring attention";
+  let fallbackSummary = "Watchdog identified notable changes across your connected website data sources.";
+  if (isNoSources) {
+    fallbackHeadline = "Monitoring not active · Connect a data source";
+    fallbackSummary = "Watchdog cannot determine website health until at least one verified data source is connected.";
+  } else if (isInsufficientData) {
+    fallbackHeadline = "Insufficient monitoring data · Gathering baseline metrics";
+    fallbackSummary = "Connected data sources do not yet have sufficient historical comparison data to evaluate performance.";
+  } else if (isStable) {
+    fallbackHeadline = "All systems normal · No significant website changes detected";
+    fallbackSummary = "No significant organic traffic drops, ranking losses, or conversion anomalies were detected across your connected data sources. Website performance and search visibility remain steady.";
+  }
+
+  const headline = escapeHtml(report.intelligence?.headline || fallbackHeadline);
+  const summary = escapeHtml(report.intelligence?.summary || fallbackSummary);
 
   // Recommended action
   const topActions = Array.isArray(report.intelligence?.recommendedActions) && report.intelligence.recommendedActions.length > 0
     ? report.intelligence.recommendedActions
-    : (isStable
-        ? ["Continue regular content updates and standard SEO monitoring.", "Verify tracking scripts remain healthy."]
-        : ["Review top ranking displacement in Google Search Console."]);
+    : (isNoSources
+        ? ["Connect Google Search Console or Google Analytics 4 to activate monitoring."]
+        : (isInsufficientData
+            ? ["Allow Watchdog to accumulate daily snapshots for baseline comparisons."]
+            : (isStable
+                ? ["Continue regular content updates and standard SEO monitoring.", "Verify tracking scripts remain healthy."]
+                : ["Review top ranking displacement in Google Search Console."])));
 
   // Findings list
   const findingsList = Array.isArray(report.intelligence?.priorityRankedFindings) && report.intelligence.priorityRankedFindings.length > 0
@@ -125,7 +190,19 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
     : (Array.isArray(report.findings) ? report.findings : []);
 
   let findingsHtml = "";
-  if (!isStable && findingsList.length > 0) {
+  if (isNoSources) {
+    findingsHtml = `
+      <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px;color:#92400E;font-size:14px;line-height:1.6;">
+        ⚠️ No data sources are currently connected. Watchdog requires Google Search Console, Google Analytics 4, or Bing Webmaster Tools to evaluate website health.
+      </div>
+    `;
+  } else if (isInsufficientData) {
+    findingsHtml = `
+      <div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px;color:#92400E;font-size:14px;line-height:1.6;">
+        ⏳ Baseline metrics are still accumulating. Watchdog requires at least 2 daily snapshots to reliably detect traffic drops, ranking shifts, or conversion anomalies.
+      </div>
+    `;
+  } else if (!isStable && findingsList.length > 0) {
     findingsHtml = findingsList.slice(0, 5).map((f) => {
       const title = escapeHtml(f.title || f.evidence?.context || f.type || "Anomaly detected");
       const badge = escapeHtml(f.priorityBadge || (f.severity === "critical" ? "P1 · Critical" : "P2 · Warning"));
@@ -158,11 +235,31 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
     `;
   }
 
-  // Active sources list
+  // Active sources list & status formatter
   const activeSources = Array.isArray(report.activeSources) ? report.activeSources : [];
   const gscSource = activeSources.find(s => s.provider === "google_search_console");
   const ga4Source = activeSources.find(s => s.provider === "google_analytics");
   const bingSource = activeSources.find(s => s.provider === "bing_webmaster" || s.provider === "bing");
+
+  function formatProviderStatus(source, provName) {
+    if (!source) return "Not connected";
+    const provSummary = report.fetchSummary?.providers?.find(p => p.provider === provName) ||
+                        report.dataFetchSummary?.providers?.find(p => p.provider === provName);
+    if (provSummary) {
+      if (provSummary.status === "error" || provSummary.error) {
+        return `Connection error · ${escapeHtml(provSummary.error || "Sync failed")}`;
+      }
+      if (provSummary.status === "unavailable") {
+        return `Connected · ${escapeHtml(provSummary.reason || "Awaiting baseline history")}`;
+      }
+      if (provSummary.available || provSummary.status === "available") {
+        return "Connected & Synced ✓";
+      }
+    }
+    if (source.status === "error") return `Connection error · ${escapeHtml(source.error || "Sync failed")}`;
+    if (source.status === "insufficient_data") return `Connected · ${escapeHtml(source.reason || "Awaiting baseline data")}`;
+    return "Connected & Synced ✓";
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -218,9 +315,9 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
 
       <div class="section-label">DATA SOURCES MONITORED</div>
       <div style="font-size:12px;color:#475569;line-height:1.8;margin-bottom:20px;">
-        <div>• <strong>Google Search Console:</strong> ${gscSource ? "Connected & Synced ✓" : "Not connected"}</div>
-        <div>• <strong>Google Analytics 4:</strong> ${ga4Source ? "Connected & Synced ✓" : "Not connected"}</div>
-        <div>• <strong>Bing Webmaster:</strong> ${bingSource ? "Connected & Synced ✓" : "Not connected"}</div>
+        <div>• <strong>Google Search Console:</strong> ${formatProviderStatus(gscSource, "google_search_console")}</div>
+        <div>• <strong>Google Analytics 4:</strong> ${formatProviderStatus(ga4Source, "google_analytics")}</div>
+        <div>• <strong>Bing Webmaster:</strong> ${formatProviderStatus(bingSource, "bing_webmaster")}</div>
       </div>
 
       <a class="cta" href="https://sharflow.online">View Live Watchdog Dashboard →</a>
@@ -254,11 +351,7 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {} }) {
     throw new Error("toEmail is required.");
   }
 
-  const isStable = report.status === "stable" || (!report.findings || report.findings.length === 0);
-  const subject = isStable
-    ? `Sharflow Watchdog: All systems normal on ${report.websiteUrl || "your website"}`
-    : `Sharflow Alert: Website changes detected on ${report.websiteUrl || "your website"}`;
-
+  const subject = getWatchdogEmailSubject(report);
   const html = watchdogReportHtml({ name: userName, report });
 
   const res = await fetch(RESEND_URL, {
@@ -322,12 +415,7 @@ async function handler(req, res) {
     } else if (action === "watchdog_report" || action === "digest") {
       const name = body.name || "";
       const report = body.report || {};
-      const isStable = report.status === "stable" || (!report.findings || report.findings.length === 0);
-
-      subject = isStable
-        ? `Sharflow Watchdog: All systems normal on ${report.websiteUrl || "your website"}`
-        : `Sharflow Alert: Website changes detected on ${report.websiteUrl || "your website"}`;
-
+      subject = getWatchdogEmailSubject(report);
       html = watchdogReportHtml({ name, report });
 
     } else {
@@ -365,3 +453,4 @@ module.exports = handler;
 module.exports.sendWatchdogEmail = sendWatchdogEmail;
 module.exports.watchdogReportHtml = watchdogReportHtml;
 module.exports.welcomeHtml = welcomeHtml;
+module.exports.getWatchdogEmailSubject = getWatchdogEmailSubject;

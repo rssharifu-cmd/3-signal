@@ -289,8 +289,242 @@ async function runTests() {
   }
   console.log("");
 
-  // ── TEST 6: Unified Entry Point (generateDailyIntelligence) ───────────────
-  console.log("🧪 Test 6: Testing Unified generateDailyIntelligence(userId)");
+  // ── TEST 6: Unified Pipeline Verification Across All Monitoring States ───
+  console.log("🧪 Test 6: Verifying generateDailyIntelligence Across Monitoring States\n");
+
+  const { getWatchdogEmailSubject, watchdogReportHtml } = require("../api/send");
+
+  // Helper assertion
+  function assert(condition, msg) {
+    if (!condition) {
+      throw new Error(`Assertion failed: ${msg}`);
+    }
+    console.log(`     ✅ ${msg}`);
+  }
+
+  // ── CASE A: Zero Connected Sources ─────────────────────────────────────────
+  console.log("  📋 Case A: Zero connected data sources");
+  const NO_SOURCES_USER = "test-no-sources@sharflow.online";
+  await db.collection("users").updateOne(
+    { email: NO_SOURCES_USER },
+    {
+      $set: {
+        name: "No Sources User",
+        email: NO_SOURCES_USER,
+        plan: "starter",
+        active: true,
+        profile: { websiteUrl: "https://nosources-example.com" },
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+  // Ensure no connected datasources
+  await db.collection("datasources").deleteMany({ userEmail: NO_SOURCES_USER });
+
+  const reportA = await generateDailyIntelligence(NO_SOURCES_USER, {
+    targetDate: "2026-09-15",
+    skipFetch: true,
+  });
+
+  assert(reportA.status === "no_sources", "reportA.status is 'no_sources'");
+  assert(reportA.monitoringStatus === "no_sources", "reportA.monitoringStatus is 'no_sources'");
+  assert(reportA.findingsCount === 0, "reportA findingsCount is 0");
+  assert(reportA.intelligence?.status === "no_sources", "reportA intelligence.status is 'no_sources'");
+  assert(reportA.intelligence?.aiCallSkipped === true, "reportA skipped LLM call (aiCallSkipped === true)");
+  assert(!reportA.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportA headline does NOT claim 'All systems normal'");
+  assert(reportA.intelligence?.headline.toLowerCase().includes("not active") || reportA.intelligence?.headline.toLowerCase().includes("connect"), "reportA headline clearly states monitoring not active / connect source");
+  assert(getWatchdogEmailSubject(reportA).includes("Monitoring not active"), "reportA email subject indicates monitoring not active");
+  assert(!watchdogReportHtml({ report: reportA }).includes("ALL SYSTEMS NORMAL"), "reportA email HTML does not render 'ALL SYSTEMS NORMAL'");
+  console.log("");
+
+  // ── CASE B: Connected Source With Failed Fetch ────────────────────────────
+  console.log("  📋 Case B: Connected data source with failed fetch (and no prior snapshots)");
+  const FAILED_FETCH_USER = "test-failed-fetch@sharflow.online";
+  await db.collection("users").updateOne(
+    { email: FAILED_FETCH_USER },
+    {
+      $set: {
+        name: "Failed Fetch User",
+        email: FAILED_FETCH_USER,
+        plan: "starter",
+        active: true,
+        profile: { websiteUrl: "https://failedfetch-example.com" },
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+  // Clear any existing snapshots
+  await db.collection("metric_snapshots").deleteMany({ userEmail: FAILED_FETCH_USER });
+  // Add connected datasource with invalid encrypted token to trigger fetch error
+  await db.collection("datasources").updateOne(
+    { userEmail: FAILED_FETCH_USER, provider: "google_search_console" },
+    {
+      $set: {
+        status: "connected",
+        encryptedRefreshToken: "invalid-token-payload",
+        selectedProperty: {
+          id: "https://failedfetch-example.com/",
+          name: "https://failedfetch-example.com/",
+          url: "https://failedfetch-example.com/",
+        },
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+
+  const reportB = await generateDailyIntelligence(FAILED_FETCH_USER, {
+    targetDate: "2026-09-15",
+    skipFetch: false, // execute real fetch which fails gracefully
+  });
+
+  assert(reportB.status === "insufficient_data", "reportB.status is 'insufficient_data'");
+  assert(reportB.monitoringStatus === "insufficient_data", "reportB.monitoringStatus is 'insufficient_data'");
+  assert(reportB.findingsCount === 0, "reportB findingsCount is 0");
+  assert(reportB.intelligence?.status === "insufficient_data", "reportB intelligence.status is 'insufficient_data'");
+  assert(reportB.intelligence?.aiCallSkipped === true, "reportB skipped LLM call (aiCallSkipped === true)");
+  assert(!reportB.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportB headline does NOT claim 'All systems normal'");
+  assert(reportB.intelligence?.headline.toLowerCase().includes("insufficient"), "reportB headline clearly states insufficient monitoring data");
+  assert(reportB.fetchSummary?.providers?.some(p => p.status === "error" || p.available === false), "reportB fetchSummary tracks provider failure");
+  assert(getWatchdogEmailSubject(reportB).includes("Gathering baseline data"), "reportB email subject indicates gathering baseline data");
+  console.log("");
+
+  // ── CASE C: Connected Source With Insufficient Historical Data (<2 Days) ─
+  console.log("  📋 Case C: Connected data source with insufficient history (< 2 snapshots)");
+  const INSUFFICIENT_HISTORY_USER = "test-insufficient-history@sharflow.online";
+  await db.collection("users").updateOne(
+    { email: INSUFFICIENT_HISTORY_USER },
+    {
+      $set: {
+        name: "Insufficient History User",
+        email: INSUFFICIENT_HISTORY_USER,
+        plan: "starter",
+        active: true,
+        profile: { websiteUrl: "https://insufficient-history-example.com" },
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+  await db.collection("datasources").updateOne(
+    { userEmail: INSUFFICIENT_HISTORY_USER, provider: "google_search_console" },
+    {
+      $set: {
+        status: "connected",
+        encryptedRefreshToken: "test-token",
+        selectedProperty: {
+          id: "https://insufficient-history-example.com/",
+          name: "https://insufficient-history-example.com/",
+          url: "https://insufficient-history-example.com/",
+        },
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+  // Clear old and seed ONLY 1 day snapshot
+  await db.collection("metric_snapshots").deleteMany({ userEmail: INSUFFICIENT_HISTORY_USER });
+  await saveMetricSnapshots([{
+    userId: "test-insufficient-history-id",
+    userEmail: INSUFFICIENT_HISTORY_USER,
+    provider: "google_search_console",
+    propertyRef: "https://insufficient-history-example.com/",
+    date: "2026-09-15",
+    metrics: { clicks: 80, impressions: 2000, ctr: 0.04, position: 11.2 },
+    dimensions: { pages: [], queries: [] },
+  }]);
+
+  const reportC = await generateDailyIntelligence(INSUFFICIENT_HISTORY_USER, {
+    targetDate: "2026-09-15",
+    skipFetch: true,
+  });
+
+  assert(reportC.status === "insufficient_data", "reportC.status is 'insufficient_data'");
+  assert(reportC.monitoringStatus === "insufficient_data", "reportC.monitoringStatus is 'insufficient_data'");
+  assert(reportC.findingsCount === 0, "reportC findingsCount is 0");
+  assert(reportC.intelligence?.status === "insufficient_data", "reportC intelligence.status is 'insufficient_data'");
+  assert(reportC.intelligence?.aiCallSkipped === true, "reportC skipped LLM call (aiCallSkipped === true)");
+  assert(!reportC.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportC headline does NOT claim 'All systems normal'");
+  assert(reportC.fetchSummary?.providers[0]?.available === false, "reportC provider marked unavailable due to <2 snapshots");
+  console.log("");
+
+  // ── CASE D: Valid Provider With Zero Anomalies (Legitimate Normal State) ──
+  console.log("  📋 Case D: Valid provider with healthy, stable metrics (zero anomalies)");
+  const STABLE_USER = "test-stable-normal@sharflow.online";
+  await db.collection("users").updateOne(
+    { email: STABLE_USER },
+    {
+      $set: {
+        name: "Stable User",
+        email: STABLE_USER,
+        plan: "starter",
+        active: true,
+        profile: { websiteUrl: "https://stable-example.com" },
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+  await db.collection("datasources").updateOne(
+    { userEmail: STABLE_USER, provider: "google_search_console" },
+    {
+      $set: {
+        status: "connected",
+        encryptedRefreshToken: "test-token",
+        selectedProperty: {
+          id: "https://stable-example.com/",
+          name: "https://stable-example.com/",
+          url: "https://stable-example.com/",
+        },
+        updatedAt: new Date(),
+      },
+    },
+    { upsert: true }
+  );
+  // Clear old snapshots and seed 14 days of completely stable, non-anomalous metrics
+  await db.collection("metric_snapshots").deleteMany({ userEmail: STABLE_USER });
+  const stableSnapshots = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(anchorDate.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = d.toISOString().split("T")[0];
+    stableSnapshots.push({
+      userId: "test-stable-id",
+      userEmail: STABLE_USER,
+      provider: "google_search_console",
+      propertyRef: "https://stable-example.com/",
+      date: dateStr,
+      metrics: { clicks: 120, impressions: 3500, ctr: 0.0343, position: 9.8 },
+      dimensions: {
+        pages: [{ page: "https://stable-example.com/about", clicks: 40, impressions: 1000, ctr: 0.04, position: 8.0 }],
+        queries: [{ query: "stable brand", clicks: 30, impressions: 800, ctr: 0.0375, position: 5.0 }],
+      },
+    });
+  }
+  await saveMetricSnapshots(stableSnapshots);
+
+  const reportD = await generateDailyIntelligence(STABLE_USER, {
+    targetDate: "2026-09-15",
+    skipFetch: true,
+  });
+
+  assert(reportD.status === "stable", "reportD.status is 'stable'");
+  assert(reportD.monitoringStatus === "active", "reportD.monitoringStatus is 'active'");
+  assert(reportD.findingsCount === 0, "reportD findingsCount is 0");
+  assert(reportD.intelligence?.status === "stable", "reportD intelligence.status is 'stable'");
+  assert(reportD.intelligence?.aiCallSkipped === true, "reportD skipped LLM call (aiCallSkipped === true)");
+  assert(reportD.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportD headline legitimately states 'All systems normal'");
+  assert(getWatchdogEmailSubject(reportD).includes("All systems normal"), "reportD email subject states 'All systems normal'");
+  assert(watchdogReportHtml({ report: reportD }).includes("ALL SYSTEMS NORMAL"), "reportD email HTML includes 'ALL SYSTEMS NORMAL'");
+  console.log("");
+
+  // ── CASE E: Valid Provider With Real Anomaly Findings ──────────────────────
+  console.log("  📋 Case E: Valid provider with genuine anomaly findings");
   // Upsert test user into users collection
   await db.collection("users").updateOne(
     { email: TEST_EMAIL },
@@ -332,19 +566,21 @@ async function runTests() {
     { upsert: true }
   );
 
-  const fullReport = await generateDailyIntelligence(TEST_EMAIL, {
+  const reportE = await generateDailyIntelligence(TEST_EMAIL, {
     targetDate: "2026-09-15",
-    skipFetch: true, // Use the seeded test data in metric_snapshots
+    skipFetch: true, // Use the seeded 56-day test data with anomalies
   });
 
-  console.log(`  ✅ Full Report generated successfully:`);
-  console.log(`     Report ID: ${fullReport.reportId}`);
-  console.log(`     Target Date: ${fullReport.targetDate}`);
-  console.log(`     Status: ${fullReport.status}`);
-  console.log(`     Findings Count: ${fullReport.findingsCount}`);
-  console.log(`     Headline: "${fullReport.intelligence.headline}"`);
-  console.log("\n===============================================================");
-  console.log("🎉 ALL WATCHDOG INTELLIGENCE PIPELINE TESTS PASSED!");
+  assert(reportE.monitoringStatus === "active", "reportE.monitoringStatus is 'active'");
+  assert(reportE.findingsCount > 0, "reportE findingsCount > 0");
+  assert(reportE.status === "critical_attention" || reportE.status === "needs_attention", "reportE status indicates attention required");
+  assert(Array.isArray(reportE.intelligence?.priorityRankedFindings) && reportE.intelligence.priorityRankedFindings.length > 0, "reportE has ranked findings");
+  assert(!reportE.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportE headline does NOT claim all systems normal");
+  assert(getWatchdogEmailSubject(reportE).includes("Website changes detected"), "reportE email subject indicates website changes detected");
+  console.log("");
+
+  console.log("===============================================================");
+  console.log("🎉 ALL 5 MONITORING STATE CASES (A through E) VERIFIED!");
   console.log("===============================================================");
 }
 

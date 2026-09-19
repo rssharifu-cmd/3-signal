@@ -22,8 +22,24 @@ const {
   getLatestSnapshotDate,
 } = require("./metricSnapshots");
 const { detectAnomalies } = require("./anomalies");
-const { interpretFindings } = require("./intelligence");
+const {
+  interpretFindings,
+  buildNoSourcesInterpretation,
+  buildInsufficientDataInterpretation,
+} = require("./intelligence");
 const { searchWeb, fetchRssFeed, searchReddit, GOOGLE_SEARCH_CENTRAL_FEED } = require("./research");
+
+/**
+ * Maps raw provider identifiers to display labels.
+ * @param {string} provider
+ * @returns {string}
+ */
+function getProviderDisplayName(provider) {
+  if (provider === "google_search_console") return "Google Search Console";
+  if (provider === "google_analytics") return "Google Analytics 4";
+  if (provider === "bing_webmaster" || provider === "bing") return "Bing Webmaster Tools";
+  return provider;
+}
 
 /**
  * Resolves a user document by userId (ObjectId or string) or email.
@@ -216,6 +232,84 @@ async function generateDailyIntelligence(userId, options = {}) {
     (s) => s.selectedProperty && s.selectedProperty.id
   );
 
+  // ── REQUIREMENT 2: ZERO CONNECTED DATA SOURCES CHECK ──────────────────────
+  // If zero sources connected, short-circuit immediately:
+  // - Do NOT generate an "All systems normal" report
+  // - Return clear "no_sources" / "Monitoring not active" state
+  // - Do NOT call Gemini, external research, or invent metrics
+  if (activeSourcesWithProperty.length === 0) {
+    let targetDate = options.targetDate;
+    if (!targetDate) {
+      targetDate = await getLatestSnapshotDate({ userEmail });
+    }
+    if (!targetDate) {
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      targetDate = yesterday.toISOString().split("T")[0];
+    }
+
+    const reportId = new ObjectId();
+    const intelligence = buildNoSourcesInterpretation();
+    const emptySummary = {
+      fetchedCount: 0,
+      providers: [],
+      errors: [],
+    };
+
+    const report = {
+      reportId: String(reportId),
+      userId: stringUserId,
+      userEmail,
+      userName: user.name || userEmail.split("@")[0],
+      targetDate,
+      generatedAt: now,
+      websiteUrl: user.profile?.websiteUrl || "",
+      monitoringStatus: "no_sources",
+      status: "no_sources",
+      activeSources: [],
+      dataFetchSummary: emptySummary,
+      fetchSummary: emptySummary,
+      comparisonWindows: {},
+      findingsCount: 0,
+      findings: [],
+      externalResearch: [],
+      intelligence,
+      sourceEvidence: [],
+    };
+
+    if (!options.dryRun) {
+      const reportsCol = db.collection("intelligence_reports");
+      await reportsCol.updateOne(
+        { userEmail, targetDate },
+        {
+          $set: {
+            ...report,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            createdAt: now,
+          },
+        },
+        { upsert: true }
+      );
+
+      await db.collection("users").updateOne(
+        { email: userEmail },
+        {
+          $set: {
+            "watchdog.lastRunAt": now,
+            "watchdog.lastReportId": String(reportId),
+            "watchdog.lastStatus": "no_sources",
+            "watchdog.lastMonitoringStatus": "no_sources",
+            "watchdog.lastFindingsCount": 0,
+            updatedAt: now,
+          },
+        }
+      );
+    }
+
+    return report;
+  }
+
   const fetchResults = [];
   const fetchErrors = [];
   const newSnapshots = [];
@@ -295,13 +389,33 @@ async function generateDailyIntelligence(userId, options = {}) {
   }
 
   const comparisonWindowsByProvider = {};
+  const usableWindowsByProvider = {};
+  const usableProviders = [];
+  const unusableProviders = [];
+
   const providersToAnalyze = [
     ...new Set(activeSourcesWithProperty.map((s) => s.provider)),
   ];
 
   for (const prov of providersToAnalyze) {
+    const fetchErr = fetchErrors.find((e) => e.provider === prov);
+    const sourceObj = activeSourcesWithProperty.find((s) => s.provider === prov);
+    const displayName = getProviderDisplayName(prov);
+
+    if (fetchErr) {
+      unusableProviders.push({
+        provider: prov,
+        name: displayName,
+        propertyRef: sourceObj?.selectedProperty?.id,
+        reason: `Fetch failed: ${fetchErr.error || "Connection error"}`,
+        error: fetchErr.error,
+      });
+      continue;
+    }
+
+    let windows = null;
     try {
-      const windows = await loadComparisonWindows({
+      windows = await loadComparisonWindows({
         userId: stringUserId,
         userEmail,
         provider: prov,
@@ -311,14 +425,136 @@ async function generateDailyIntelligence(userId, options = {}) {
     } catch (err) {
       console.warn(`[Watchdog Windows Warning] Failed to load windows for ${prov}:`, err.message);
     }
+
+    const totalLoaded = windows?.totalSnapshotsLoaded || 0;
+    if (totalLoaded < 2) {
+      unusableProviders.push({
+        provider: prov,
+        name: displayName,
+        propertyRef: sourceObj?.selectedProperty?.id,
+        reason: totalLoaded === 0
+          ? "No metric snapshots found for this provider"
+          : "Insufficient historical baseline data (at least 2 daily snapshots required to evaluate trends)",
+        snapshotsLoaded: totalLoaded,
+      });
+    } else {
+      usableProviders.push({
+        provider: prov,
+        name: displayName,
+        propertyRef: sourceObj?.selectedProperty?.id,
+        snapshotsLoaded: totalLoaded,
+      });
+      usableWindowsByProvider[prov] = windows;
+    }
+  }
+
+  // ── REQUIREMENT 3: INSUFFICIENT DATA CHECK ────────────────────────────────
+  // If ALL connected providers fail or provide no usable comparison data:
+  // - Return "insufficient_data" state rather than "All systems normal"
+  // - Do NOT call Gemini
+  // - Do NOT call external research
+  // - Do NOT invent metrics
+  if (usableProviders.length === 0) {
+    const reportId = new ObjectId();
+    const fetchSummary = {
+      fetchedCount: newSnapshots.length,
+      providers: activeSourcesWithProperty.map((source) => {
+        const prov = source.provider;
+        const fetchRes = fetchResults.find((r) => r.provider === prov);
+        const fetchErr = fetchErrors.find((e) => e.provider === prov);
+        const isUnusable = unusableProviders.find((u) => u.provider === prov);
+        return {
+          provider: prov,
+          propertyRef: source.selectedProperty?.id,
+          status: fetchErr ? "error" : "unavailable",
+          available: false,
+          success: !fetchErr,
+          snapshotsCount: fetchRes?.snapshotsCount || 0,
+          error: fetchErr?.error || null,
+          reason: isUnusable?.reason || null,
+        };
+      }),
+      errors: fetchErrors,
+    };
+
+    const intelligence = buildInsufficientDataInterpretation(unusableProviders);
+    const websiteUrl = user.profile?.websiteUrl || activeSourcesWithProperty[0]?.selectedProperty?.url || "";
+
+    const report = {
+      reportId: String(reportId),
+      userId: stringUserId,
+      userEmail,
+      userName: user.name || userEmail.split("@")[0],
+      targetDate,
+      generatedAt: now,
+      websiteUrl,
+      monitoringStatus: "insufficient_data",
+      status: "insufficient_data",
+      activeSources: activeSourcesWithProperty.map((s) => {
+        const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
+        const unusable = unusableProviders.find((u) => u.provider === s.provider);
+        return {
+          provider: s.provider,
+          propertyId: s.selectedProperty.id,
+          propertyName: s.selectedProperty.name,
+          url: s.selectedProperty.url,
+          lastSync: s.lastSuccessfulSync || null,
+          status: fetchErr ? "error" : "insufficient_data",
+          error: fetchErr?.error || null,
+          reason: unusable?.reason || null,
+        };
+      }),
+      dataFetchSummary: fetchSummary,
+      fetchSummary,
+      comparisonWindows: comparisonWindowsByProvider,
+      findingsCount: 0,
+      findings: [],
+      externalResearch: [],
+      intelligence,
+      sourceEvidence: unusableProviders.map((u) => `${u.name} (Unavailable: ${u.reason})`),
+    };
+
+    if (!options.dryRun) {
+      const reportsCol = db.collection("intelligence_reports");
+      await reportsCol.updateOne(
+        { userEmail, targetDate },
+        {
+          $set: {
+            ...report,
+            updatedAt: now,
+          },
+          $setOnInsert: {
+            createdAt: now,
+          },
+        },
+        { upsert: true }
+      );
+
+      await db.collection("users").updateOne(
+        { email: userEmail },
+        {
+          $set: {
+            "watchdog.lastRunAt": now,
+            "watchdog.lastReportId": String(reportId),
+            "watchdog.lastStatus": "insufficient_data",
+            "watchdog.lastMonitoringStatus": "insufficient_data",
+            "watchdog.lastFindingsCount": 0,
+            updatedAt: now,
+          },
+        }
+      );
+    }
+
+    return report;
   }
 
   // ── 4. DETERMINISTIC ANOMALY DETECTION (STEP 3) ───────────────────────────
-  // Pure code rules, strictly zero LLM calls
+  // Analyze ONLY providers with usable comparison data.
+  // Missing/failed providers do not generate spurious findings.
   const findings = detectAnomalies({
     userId: stringUserId,
     userEmail,
-    comparisonWindows: comparisonWindowsByProvider,
+    comparisonWindows: usableWindowsByProvider,
     userProfile: user.profile || {},
     targetDate,
   });
@@ -346,19 +582,44 @@ async function generateDailyIntelligence(userId, options = {}) {
       profile: user.profile || {},
       websiteUrl,
     },
-    comparisonWindows: comparisonWindowsByProvider,
+    comparisonWindows: usableWindowsByProvider,
     externalResearch,
+    usableProviders,
+    unusableProviders,
   });
 
   // ── 7. COMPILE FINAL REPORT ───────────────────────────────────────────────
   const reportId = new ObjectId();
+  const fetchSummary = {
+    fetchedCount: newSnapshots.length,
+    providers: activeSourcesWithProperty.map((source) => {
+      const prov = source.provider;
+      const fetchRes = fetchResults.find((r) => r.provider === prov);
+      const fetchErr = fetchErrors.find((e) => e.provider === prov);
+      const isUsable = usableProviders.find((u) => u.provider === prov);
+      const isUnusable = unusableProviders.find((u) => u.provider === prov);
+      return {
+        provider: prov,
+        propertyRef: source.selectedProperty?.id,
+        status: fetchErr ? "error" : (isUsable ? "available" : "unavailable"),
+        available: Boolean(isUsable),
+        success: !fetchErr,
+        snapshotsCount: fetchRes?.snapshotsCount || isUsable?.snapshotsLoaded || 0,
+        error: fetchErr?.error || null,
+        reason: isUnusable?.reason || null,
+      };
+    }),
+    errors: fetchErrors,
+  };
+
   const sourceEvidence = [
-    ...activeSourcesWithProperty.map((s) => {
+    ...usableProviders.map((s) => {
       if (s.provider === "google_search_console") return "Google Search Console (Verified organic search data)";
       if (s.provider === "google_analytics") return "Google Analytics 4 (Verified traffic & conversion data)";
       if (s.provider === "bing_webmaster" || s.provider === "bing") return "Bing Webmaster Tools (Verified search indexing data)";
-      return s.provider;
+      return s.name || s.provider;
     }),
+    ...unusableProviders.map((u) => `${u.name} (Unavailable: ${u.reason})`),
     ...(externalResearch.length > 0 ? ["External Research Layer (Official Search Central, community webmaster reports)"] : []),
   ];
 
@@ -370,25 +631,31 @@ async function generateDailyIntelligence(userId, options = {}) {
     targetDate,
     generatedAt: now,
     websiteUrl,
-    activeSources: activeSourcesWithProperty.map((s) => ({
-      provider: s.provider,
-      propertyId: s.selectedProperty.id,
-      propertyName: s.selectedProperty.name,
-      url: s.selectedProperty.url,
-      lastSync: s.lastSuccessfulSync || now,
-    })),
-    dataFetchSummary: {
-      fetchedCount: newSnapshots.length,
-      providers: fetchResults,
-      errors: fetchErrors,
-    },
+    monitoringStatus: "active",
+    status: intelligence.status || (findings.length === 0 ? "stable" : "warning"),
+    activeSources: activeSourcesWithProperty.map((s) => {
+      const isUsable = usableProviders.some((u) => u.provider === s.provider);
+      const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
+      const unusable = unusableProviders.find((u) => u.provider === s.provider);
+      return {
+        provider: s.provider,
+        propertyId: s.selectedProperty.id,
+        propertyName: s.selectedProperty.name,
+        url: s.selectedProperty.url,
+        lastSync: s.lastSuccessfulSync || now,
+        status: isUsable ? "active" : (fetchErr ? "error" : "insufficient_data"),
+        error: fetchErr?.error || null,
+        reason: unusable?.reason || null,
+      };
+    }),
+    dataFetchSummary: fetchSummary,
+    fetchSummary,
     comparisonWindows: comparisonWindowsByProvider,
     findingsCount: findings.length,
     findings,
     externalResearch,
     intelligence,
     sourceEvidence,
-    status: intelligence.status || "stable",
   };
 
   // ── 8. PERSIST REPORT TO MONGODB ──────────────────────────────────────────
@@ -416,6 +683,7 @@ async function generateDailyIntelligence(userId, options = {}) {
           "watchdog.lastRunAt": now,
           "watchdog.lastReportId": String(reportId),
           "watchdog.lastStatus": report.status,
+          "watchdog.lastMonitoringStatus": "active",
           "watchdog.lastFindingsCount": findings.length,
           updatedAt: now,
         },
