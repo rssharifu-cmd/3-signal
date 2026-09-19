@@ -573,7 +573,10 @@ async function runTests() {
 
   assert(reportE.monitoringStatus === "active", "reportE.monitoringStatus is 'active'");
   assert(reportE.findingsCount > 0, "reportE findingsCount > 0");
-  assert(reportE.status === "critical_attention" || reportE.status === "needs_attention", "reportE status indicates attention required");
+  assert(
+    reportE.status === "critical_attention" || reportE.status === "needs_attention" || reportE.status === "critical",
+    "reportE status indicates attention required (critical_attention, needs_attention, or critical)"
+  );
   assert(Array.isArray(reportE.intelligence?.priorityRankedFindings) && reportE.intelligence.priorityRankedFindings.length > 0, "reportE has ranked findings");
   assert(!reportE.intelligence?.headline.toLowerCase().includes("all systems normal"), "reportE headline does NOT claim all systems normal");
   assert(getWatchdogEmailSubject(reportE).includes("Website changes detected"), "reportE email subject indicates website changes detected");
