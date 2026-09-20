@@ -82,9 +82,33 @@ html, body {
   align-items: center;
   justify-content: space-between;
 }
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.brand-mark {
+  height: 34px;
+  width: auto;
+  display: block;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.nav-brand:hover .brand-mark {
+  transform: scale(1.04);
+}
 .nav-logo { font-family: var(--serif); font-size: 24px; letter-spacing: -0.02em; }
 .nav-logo em { font-style: normal; color: var(--accent); }
 .nav-actions { display: flex; gap: 10px; align-items: center; }
+
+@media (min-width: 768px) {
+  .topbar-tagline-desktop {
+    display: inline-block !important;
+  }
+}
 
 /* Landing */
 .hero {

@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sharflow · Admin API Status</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -163,8 +168,9 @@
   <!-- Minimal Top Bar -->
   <header class="nav">
     <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-      <a href="/" style="text-decoration:none; display:flex; align-items:center; gap:8px;">
-        <span class="logo">Sharflow</span>
+      <a href="/" style="text-decoration:none; display:flex; align-items:center; gap:10px;">
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="30" height="35" style="height:32px;width:auto;display:block;" />
+        <span class="logo" style="font-family:var(--sans);font-weight:700;font-size:18px;color:var(--text);">Sharflow</span>
         <span style="font-size:12px; font-weight:600; color:var(--muted); background:var(--surface-2); padding:2px 8px; border-radius:6px; border:1px solid var(--border);">Admin</span>
       </a>
       <a href="/" class="btn btn-ghost btn-sm">← Back to App</a>
@@ -369,6 +375,13 @@
   </script>
 
   <footer style="margin-top:48px;">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="24" height="28" style="height:26px;width:auto;display:block;" />
+        <strong style="font-size:15px;color:var(--text);">Sharflow</strong>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin:0;">You run your business. Sharflow watches your website.</p>
+    </div>
     <p>© 2026 Sharflow · <a href="/privacy" style="color:var(--muted);font-size:12px;text-decoration:none;">Privacy Policy</a> · <a href="/terms" style="color:var(--muted);font-size:12px;text-decoration:none;">Terms of Service</a> · <a href="/" style="color:var(--muted);font-size:12px;text-decoration:none;">Home</a></p>
   </footer>
 </body>

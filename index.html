@@ -3,10 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention." />
-  <meta property="og:title" content="Sharflow — AI Website Watchdog" />
-  <meta property="og:description" content="AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention." />
   <title>Sharflow — AI Website Watchdog</title>
+  <meta name="description" content="Sharflow watches your website, detects important changes, and tells you what needs attention." />
+  <link rel="canonical" href="https://sharflow.online/" />
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sharflow.online/" />
+  <meta property="og:title" content="Sharflow — AI Website Watchdog" />
+  <meta property="og:description" content="Sharflow watches your website, detects important changes, and tells you what needs attention." />
+  <meta property="og:image" content="https://sharflow.online/assets/sharflow-logo.png" />
+  <meta property="og:image:alt" content="Sharflow — AI Website Watchdog" />
+  <meta property="og:site_name" content="Sharflow" />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://sharflow.online/" />
+  <meta name="twitter:title" content="Sharflow — AI Website Watchdog" />
+  <meta name="twitter:description" content="Sharflow watches your website, detects important changes, and tells you what needs attention." />
+  <meta name="twitter:image" content="https://sharflow.online/assets/sharflow-logo.png" />
+  <meta name="twitter:image:alt" content="Sharflow — AI Website Watchdog" />
+
+  <!-- Structured Data: Organization JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "Sharflow",
+    "url": "https://sharflow.online/",
+    "logo": "https://sharflow.online/assets/sharflow-logo.png",
+    "description": "Sharflow watches your website, detects important changes, and tells you what needs attention.",
+    "slogan": "You run your business. Sharflow watches your website."
+  }
+  </script>
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
   <script>
     // Safeguard to prevent "TypeError: Cannot set property fetch of #<Window> which has only a getter"
     // which can occur in sandboxed frame wrappers or extensions attempting to proxy/override fetch.
@@ -37,7 +72,10 @@
 <!-- Landing -->
 <div id="landing-view">
   <nav class="nav">
-    <div class="nav-logo">Sharflow<em>.</em></div>
+    <a href="/" class="nav-brand">
+      <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="34" height="40" class="brand-mark" />
+      <span class="nav-logo">Sharflow<em>.</em></span>
+    </a>
     <div class="nav-actions">
       <button class="btn btn-ghost" onclick="openAuthModal('login')">Sign in</button>
       <button class="btn btn-primary" onclick="openAuthModal('signup')">Get started</button>
@@ -46,9 +84,12 @@
 
   <!-- Hero -->
   <section class="hero">
-    <div class="hero-eyebrow">AI Website Watchdog</div>
+    <div class="hero-brand-badge" style="margin-bottom:20px;display:inline-flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);padding:6px 14px 6px 8px;border-radius:100px;box-shadow:var(--shadow-sm);">
+      <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="22" height="26" style="height:24px;width:auto;display:block;" />
+      <span style="font-size:13px;font-weight:600;color:var(--text);letter-spacing:0.01em;">Sharflow <span style="color:var(--muted);font-weight:400;">· AI Website Watchdog</span></span>
+    </div>
     <h1>Your website may have problems<br/><span>you're not seeing.</span></h1>
-    <p class="hero-lead">You run your business. The Watchdog watches your website.<br/>Monitors key search and performance signals, spots meaningful changes, and alerts you only when something needs attention.</p>
+    <p class="hero-lead">You run your business. Sharflow watches your website.<br/>Monitors key search and performance signals, spots meaningful changes, and alerts you only when something needs attention.</p>
     <div class="hero-actions">
       <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
       <button class="btn btn-secondary btn-lg" onclick="document.getElementById('how-it-works').scrollIntoView({behavior:'smooth'})">How it works</button>
@@ -87,7 +128,7 @@
     <div class="section-inner">
       <p class="section-label">How it works</p>
       <h2 class="section-title">Zero dashboards to babysit</h2>
-      <p class="section-desc">You run your business. The Watchdog quietly monitors your website so you don't have to spend hours checking metrics every day.</p>
+      <p class="section-desc">You run your business. Sharflow watches your website so you don't have to spend hours checking metrics every day.</p>
       
       <div class="steps-grid">
         <div class="step-card">
@@ -272,8 +313,9 @@
   <section class="section alt" id="cta">
     <div class="section-inner">
       <div class="cta-box">
-        <h2>Let your AI Watchdog watch your website.</h2>
-        <p>You run your business. The Watchdog watches your website.<br/>Join early access and get alerted when something important needs attention.</p>
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="52" height="61" style="height:52px;width:auto;margin:0 auto 16px;display:block;" />
+        <h2>You run your business.<br/>Sharflow watches your website.</h2>
+        <p>Join early access and get alerted when something important needs attention.</p>
         <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
         <p class="cta-subtext">Early access · No credit card required</p>
       </div>
@@ -281,13 +323,27 @@
   </section>
 
   <footer>
-    <p>© 2026 Sharflow · AI Website Watchdog · <a href="/privacy" style="color:var(--muted);font-size:12px;text-decoration:none;">Privacy Policy</a> · <a href="/terms" style="color:var(--muted);font-size:12px;text-decoration:none;">Terms of Service</a> · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
+    <div class="footer-brand" style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="26" height="31" style="height:28px;width:auto;display:block;" />
+        <strong style="font-size:16px;color:var(--text);letter-spacing:-0.01em;">Sharflow</strong>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin:0;">You run your business. Sharflow watches your website.</p>
+    </div>
+    <p style="margin:0;font-size:12px;color:var(--dim);">© 2026 Sharflow · AI Website Watchdog · <a href="/privacy" style="color:var(--muted);font-size:12px;text-decoration:none;">Privacy Policy</a> · <a href="/terms" style="color:var(--muted);font-size:12px;text-decoration:none;">Terms of Service</a> · <a href="/admin.html" style="color:var(--muted);font-size:12px;text-decoration:none;">Admin</a></p>
   </footer>
 </div>
 
 <!-- Auth modal -->
 <div class="modal-overlay" id="auth-modal">
   <div class="modal-card">
+    <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:18px;">
+      <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="34" height="40" style="height:36px;width:auto;display:block;" />
+      <div style="text-align:left;">
+        <div style="font-family:var(--sans);font-weight:700;font-size:18px;line-height:1.2;color:var(--text);">Sharflow</div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.2;">You run your business. Sharflow watches your website.</div>
+      </div>
+    </div>
     <div class="auth-tabs">
       <button class="auth-tab active" id="tab-signup" onclick="switchAuthTab('signup')">Create account</button>
       <button class="auth-tab" id="tab-login" onclick="switchAuthTab('login')">Sign in</button>
@@ -317,11 +373,17 @@
 <!-- App shell -->
 <div id="app-shell">
   <header class="app-topbar">
-    <div>
-      <span class="app-topbar-title">Sharflow.</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <a href="/" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;">
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="28" height="33" style="height:28px;width:auto;display:block;" />
+        <span class="app-topbar-title">Sharflow</span>
+      </a>
       <span class="app-badge" id="phase-label">Setup</span>
     </div>
-    <button class="btn btn-ghost btn-sm" onclick="resetAll()">Reset</button>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <span class="topbar-tagline-desktop" style="font-size:12px;color:var(--muted);display:none;">You run your business. Sharflow watches your website.</span>
+      <button class="btn btn-ghost btn-sm" onclick="resetAll()">Reset</button>
+    </div>
   </header>
 
   <!-- Structured Website Watchdog Onboarding -->
@@ -474,7 +536,13 @@
       <!-- Overview -->
       <div class="dash-panel" id="panel-overview">
         <div class="dash-header">
-          <h1 id="dash-greeting">Good afternoon</h1>
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+            <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="34" height="40" style="height:36px;width:auto;display:block;flex-shrink:0;" />
+            <div>
+              <h1 id="dash-greeting" style="margin:0;">Good afternoon</h1>
+              <p style="margin:2px 0 0;font-size:13px;color:var(--muted);font-weight:500;">You run your business. Sharflow watches your website.</p>
+            </div>
+          </div>
           <p id="dash-subgreeting">Your website monitoring profile is configured. Data sources will be connected in the next phase.</p>
         </div>
 

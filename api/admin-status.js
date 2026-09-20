@@ -280,7 +280,7 @@ async function checkReddit() {
   try {
     const res = await withTimeout(
       fetch("https://www.reddit.com/search.json?q=technology&sort=relevance&limit=1", {
-        headers: { "User-Agent": "Signal-NewsDigest/1.0 (by /u/sharflow)" },
+        headers: { "User-Agent": "Sharflow-Watchdog/1.0 (by /u/sharflow)" },
       }),
       TIMEOUT_MS,
       "Reddit Public API"

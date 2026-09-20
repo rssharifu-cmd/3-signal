@@ -1,6 +1,6 @@
 {
   "name": "Sharflow",
-  "description": "AI Website Watchdog that monitors website performance, search visibility, and critical changes — alerting you only when something needs attention.",
+  "description": "Sharflow watches your website, detects important changes, and tells you what needs attention.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
