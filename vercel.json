@@ -15,6 +15,12 @@
     { "source": "/privacy/", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/terms/", "destination": "/terms.html" },
+    { "source": "/about", "destination": "/about.html" },
+    { "source": "/about/", "destination": "/about.html" },
+    { "source": "/contact", "destination": "/contact.html" },
+    { "source": "/contact/", "destination": "/contact.html" },
+    { "source": "/robots.txt", "destination": "/robots.txt" },
+    { "source": "/sitemap.xml", "destination": "/sitemap.xml" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

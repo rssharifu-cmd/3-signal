@@ -16,7 +16,7 @@
 const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT_CAP = 15;
-const REDDIT_USER_AGENT = "Sharflow-Watchdog/1.0 (research-layer; by /u/sharflow)";
+const REDDIT_USER_AGENT = "Sharflow/1.0";
 
 /**
  * Executes a Promise with a strict timeout limit.

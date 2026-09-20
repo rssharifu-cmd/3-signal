@@ -280,7 +280,7 @@ async function checkReddit() {
   try {
     const res = await withTimeout(
       fetch("https://www.reddit.com/search.json?q=technology&sort=relevance&limit=1", {
-        headers: { "User-Agent": "Sharflow-Watchdog/1.0 (by /u/sharflow)" },
+        headers: { "User-Agent": "Sharflow/1.0" },
       }),
       TIMEOUT_MS,
       "Reddit Public API"
@@ -384,7 +384,7 @@ async function checkResend() {
       message: `API Key verified via read-only domains endpoint (${domains.length} domain(s) configured).`,
       extra: {
         configuredDomains: domains,
-        senderFrom: process.env.FROM_EMAIL || "Sharflow <onboarding@resend.dev>",
+        senderFrom: process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>",
       },
     };
   } catch (err) {

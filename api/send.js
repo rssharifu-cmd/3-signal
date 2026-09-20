@@ -8,7 +8,7 @@
  *
  * Required env vars:
  *   RESEND_API_KEY   — from resend.com dashboard
- *   FROM_EMAIL       — e.g. "Sharflow <watchdog@sharflow.online>"
+ *   EMAIL_FROM       — e.g. "Sharflow <hello@sharflow.online>" (fallback: FROM_EMAIL or "Sharflow <hello@sharflow.online>")
  */
 
 const RESEND_URL = "https://api.resend.com/emails";
@@ -342,7 +342,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
  */
 async function sendWatchdogEmail({ toEmail, userName = "", report = {} }) {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.FROM_EMAIL || "Sharflow <watchdog@sharflow.online>").trim();
+  const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
 
   if (!apiKey) {
     throw new Error("Missing RESEND_API_KEY env var.");
@@ -363,6 +363,7 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {} }) {
     body: JSON.stringify({
       from: fromEmail,
       to: [toEmail],
+      reply_to: "hello@sharflow.online",
       subject,
       html,
     }),
@@ -387,7 +388,7 @@ async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.FROM_EMAIL || "Sharflow <watchdog@sharflow.online>").trim();
+  const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
 
   if (!apiKey) {
     return res.status(400).json({ error: "Missing RESEND_API_KEY env var." });
@@ -431,6 +432,7 @@ async function handler(req, res) {
       body: JSON.stringify({
         from: fromEmail,
         to: [toEmail],
+        reply_to: "hello@sharflow.online",
         subject,
         html,
       }),

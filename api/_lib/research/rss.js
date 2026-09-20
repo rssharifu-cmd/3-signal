@@ -196,7 +196,7 @@ async function fetchRssFeed({
     const res = await withTimeout(
       fetch(cleanUrl, {
         headers: {
-          "User-Agent": "Sharflow-Watchdog/1.0 (RSS Research)",
+          "User-Agent": "Sharflow/1.0",
           Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
         },
       }),

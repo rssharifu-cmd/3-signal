@@ -47,7 +47,15 @@ app.all("/api/:route", async (req, res) => {
   }
 });
 
-// Public legal pages
+// Public static and legal pages
+app.get(["/about", "/about/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "about.html"));
+});
+
+app.get(["/contact", "/contact/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "contact.html"));
+});
+
 app.get(["/privacy", "/privacy/"], (req, res) => {
   res.sendFile(path.join(__dirname, "privacy.html"));
 });
