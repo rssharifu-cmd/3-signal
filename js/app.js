@@ -1116,9 +1116,14 @@ function renderWatchdogReportHtml(report) {
   let html = `
     <div class="watchdog-report-view">
       <div class="watchdog-report-header" style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border);">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-          <span class="watchdog-badge watchdog-badge-${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
-          ${report.targetDate ? `<span style="font-size:12px;color:var(--dim);">Target date: ${escapeHtml(report.targetDate)}</span>` : ""}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="watchdog-badge watchdog-badge-${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
+            ${report.targetDate ? `<span style="font-size:12px;color:var(--dim);">Target date: ${escapeHtml(report.targetDate)}</span>` : ""}
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="exportReportCSV()" style="font-size:12px;padding:3px 10px;" title="Download audit findings as formatted CSV">
+            Export Report 📥
+          </button>
         </div>
         <h2 style="font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.35;margin-bottom:8px;">${escapeHtml(headline)}</h2>
         ${summary ? `<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0;">${escapeHtml(summary)}</p>` : ""}
@@ -1429,6 +1434,202 @@ async function sendDigestEmail() {
     toast("Watchdog report emailed to " + savedEmail);
   } catch (e) {
     toast("Email failed: " + e.message);
+  }
+}
+
+function exportReportCSV() {
+  const rawSavedReport = localStorage.getItem(STORAGE.lastWatchdogReport);
+  let report = window._lastWatchdogReport || null;
+  if (!report && rawSavedReport) {
+    try {
+      report = JSON.parse(rawSavedReport);
+    } catch {}
+  }
+
+  if (!report) {
+    toast("No audit report available to export. Run 'Check my website now' first.");
+    return;
+  }
+
+  const intel = report.intelligence || {};
+  const status = (intel.status || report.status || report.monitoringStatus || "normal").toLowerCase();
+  const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
+  const isNoSources = status === "no_sources" || monitoringStatus === "no_sources";
+  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
+
+  const form = typeof getSavedForm === "function" ? getSavedForm() : {};
+  const websiteDomain = report.websiteDomain || form.website || "your-website.com";
+  const reportDate = report.targetDate || new Date().toISOString().split("T")[0];
+
+  // Helper for CSV escaping (RFC 4180 + Excel DDE / formula injection protection)
+  function csvCell(val) {
+    if (val == null) return '""';
+    let str = String(val).trim();
+    // Neutralize spreadsheet formula injection (=, +, -, @)
+    if (/^[=+\-@]/.test(str)) {
+      str = "'" + str;
+    }
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+
+  const headers = [
+    "Report Date",
+    "Website",
+    "Priority",
+    "Severity",
+    "Finding Title",
+    "Category",
+    "Affected Scope",
+    "Evidence Context",
+    "Metric Shift",
+    "Probable Root Cause",
+    "Impact Assessment",
+    "Recommended Actions"
+  ];
+
+  const rows = [];
+  const findings = Array.isArray(intel.priorityRankedFindings) && intel.priorityRankedFindings.length > 0
+    ? intel.priorityRankedFindings
+    : (Array.isArray(report.findings) ? report.findings : []);
+
+  const overallActions = Array.isArray(intel.recommendedActions) ? intel.recommendedActions : [];
+
+  if (findings.length > 0) {
+    findings.forEach((f, idx) => {
+      const rank = f.priorityRank || (idx + 1);
+      const priority = f.priorityBadge || `P${rank}`;
+      const severity = (f.severity || (priority.includes("P1") ? "critical" : "warning")).toUpperCase();
+      const title = f.title || f.evidence?.context || f.originalEvidence?.context || f.type || `Finding #${rank}`;
+      const category = f.type || "Performance Metric";
+      const scope = f.scope || f.originalEvidence?.scope || f.evidence?.scope || "Site-wide";
+
+      let evidenceText = "";
+      if (f.originalEvidence?.context) {
+        evidenceText = f.originalEvidence.context;
+      } else if (f.evidence?.context) {
+        evidenceText = f.evidence.context;
+      } else if (f.originalEvidence?.metric) {
+        evidenceText = `${f.originalEvidence.metric}: ${f.originalEvidence.deltaPercent != null ? f.originalEvidence.deltaPercent + '%' : ''}`;
+      } else if (f.evidence?.metric) {
+        evidenceText = `${f.evidence.metric}: ${f.evidence.deltaPercent != null ? f.evidence.deltaPercent + '%' : ''}`;
+      } else {
+        evidenceText = "Identified via baseline comparison";
+      }
+
+      let deltaText = "";
+      if (f.originalEvidence?.deltaPercent != null) {
+        deltaText = `${f.originalEvidence.deltaPercent}%`;
+      } else if (f.evidence?.deltaPercent != null) {
+        deltaText = `${f.evidence.deltaPercent}%`;
+      }
+
+      const rootCause = f.primaryCause || (Array.isArray(f.plausibleCauses) && f.plausibleCauses.length > 0 ? f.plausibleCauses[0] : "Requires manual audit");
+      const impact = f.impactAssessment || `Impacts ${scope}`;
+
+      let actionsText = "";
+      if (Array.isArray(f.recommendedActions) && f.recommendedActions.length > 0) {
+        actionsText = f.recommendedActions.map((a) => {
+          if (typeof a === "string") return a;
+          const urg = a.urgency ? `[${a.urgency.toUpperCase()}] ` : "";
+          const act = a.action || "";
+          const det = a.detail ? ` (${a.detail})` : "";
+          return `${urg}${act}${det}`;
+        }).join(" | ");
+      } else if (overallActions.length > 0) {
+        actionsText = overallActions.map((a) => typeof a === "string" ? a : a.action).join(" | ");
+      }
+
+      rows.push([
+        reportDate,
+        websiteDomain,
+        priority,
+        severity,
+        title,
+        category,
+        scope,
+        evidenceText,
+        deltaText,
+        rootCause,
+        impact,
+        actionsText
+      ]);
+    });
+  } else {
+    let statusPriority = "P0";
+    let statusSeverity = "NORMAL";
+    let statusTitle = intel.headline || "Website Watchdog Scan Complete";
+    let statusCategory = "Health Check";
+    let statusEvidence = intel.summary || "All metrics tracking within baseline bounds. No significant ranking or traffic anomalies detected.";
+    let statusCause = "None - systems operating normally";
+    let statusImpact = "No negative business impact detected";
+    let statusActions = overallActions.map((a) => typeof a === "string" ? a : a.action).join(" | ") || "Continue automated monitoring";
+
+    if (isNoSources) {
+      statusPriority = "CONFIG";
+      statusSeverity = "INFO";
+      statusTitle = "No connected data sources";
+      statusCategory = "Configuration";
+      statusEvidence = "Watchdog requires Google Search Console, GA4, or Bing Webmaster Tools to evaluate website health.";
+      statusCause = "Data sources not yet linked";
+      statusImpact = "Active anomaly detection paused until data sources are connected";
+      statusActions = "Connect data sources in Data Sources tab";
+    } else if (isInsufficientData) {
+      statusPriority = "BASELINE";
+      statusSeverity = "PENDING";
+      statusTitle = "Insufficient monitoring baseline";
+      statusCategory = "Baseline Accumulation";
+      statusEvidence = "Requires at least 2 consecutive daily snapshots to evaluate trend baselines and confirm normal website health.";
+      statusCause = "Initial snapshot baseline in progress";
+      statusImpact = "Historical comparison baselines pending";
+      statusActions = "Awaiting subsequent daily scan snapshots";
+    }
+
+    rows.push([
+      reportDate,
+      websiteDomain,
+      statusPriority,
+      statusSeverity,
+      statusTitle,
+      statusCategory,
+      "Site-wide",
+      statusEvidence,
+      "0%",
+      statusCause,
+      statusImpact,
+      statusActions
+    ]);
+  }
+
+  // Prepend UTF-8 BOM so Excel & Sheets cleanly recognize special characters
+  const csvLines = [
+    headers.map(csvCell).join(","),
+    ...rows.map((row) => row.map(csvCell).join(","))
+  ];
+  const csvContent = "\uFEFF" + csvLines.join("\r\n");
+
+  const safeDomain = (websiteDomain || "website")
+    .replace(/^https?:\/\//i, "")
+    .replace(/[^a-zA-Z0-9.-]/g, "_")
+    .replace(/\./g, "-")
+    .slice(0, 32);
+  const safeDate = String(reportDate).replace(/[^0-9-]/g, "");
+  const filename = `sharflow-audit-${safeDomain}-${safeDate}.csv`;
+
+  try {
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast("Audit report exported as CSV 📥");
+  } catch (err) {
+    console.error("Failed to download CSV:", err);
+    toast("Error exporting CSV report.");
   }
 }
 
@@ -2077,3 +2278,4 @@ window.hidePropertyPicker = hidePropertyPicker;
 window.saveSelectedProperty = saveSelectedProperty;
 window.disconnectDataSource = disconnectDataSource;
 window.loadDataSources = loadDataSources;
+window.exportReportCSV = exportReportCSV;
