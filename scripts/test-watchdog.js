@@ -28,6 +28,111 @@ const { generateDailyIntelligence } = require("../api/_lib/generateDailyIntellig
 
 const TEST_EMAIL = process.argv[2] || "test-watchdog@sharflow.online";
 
+const FIXED_TEST_EMAILS = [
+  "test-no-sources@sharflow.online",
+  "test-failed-fetch@sharflow.online",
+  "test-insufficient-history@sharflow.online",
+  "test-stable-normal@sharflow.online",
+];
+
+const TEST_USER_IDS = [
+  "test-user-id",
+  "test-insufficient-history-id",
+  "test-stable-id",
+];
+
+/**
+ * Verifies that running this script is explicitly authorized and cannot
+ * accidentally overwrite a real user account.
+ */
+function enforceTestSafetyGuards(mongoUri, dbName) {
+  const uriStr = String(mongoUri || "");
+  // Extract database path segment from URI (note: Atlas default dbName is "test" when URI has no path)
+  const uriPathMatch = uriStr.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^?]*)/i);
+  const explicitUriDb = (uriPathMatch && uriPathMatch[1] ? uriPathMatch[1] : "").trim();
+  const isDedicatedTestOrStagingDb = /(test|staging)/i.test(explicitUriDb) && explicitUriDb.toLowerCase() !== "test";
+
+  if (!isDedicatedTestOrStagingDb) {
+    console.warn("⚠️  WARNING: MONGODB_URI does not point to an isolated test/staging database");
+    console.warn(`   (connected dbName="${dbName}", explicit URI db="${explicitUriDb || "<default>"}").`);
+    console.warn("   Running this script writes temporary test records to the target database.");
+  }
+
+  if (process.env.ALLOW_PROD_TEST_WRITES !== "true") {
+    console.error("\n🛑 SAFETY GUARD BLOCKED EXECUTION:");
+    console.error("   Refusing to write test fixtures to MongoDB without explicit confirmation.");
+    console.error("   To run this test suite (with automatic teardown), set:");
+    console.error("     ALLOW_PROD_TEST_WRITES=true node scripts/test-watchdog.js\n");
+    process.exit(1);
+  }
+
+  // Prevent overwriting real user accounts if someone passes a real email via CLI arg
+  const safeEmailPattern = /^test-[a-z0-9._-]+@(sharflow\.online|example\.com)$/i;
+  if (!safeEmailPattern.test(TEST_EMAIL)) {
+    console.error(`\n🛑 SAFETY GUARD BLOCKED EXECUTION:`);
+    console.error(`   Target email "${TEST_EMAIL}" is not a safe synthetic test address.`);
+    console.error(`   Must match: test-*@sharflow.online or test-*@example.com\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Deletes all test users, datasources, metric_snapshots, intelligence_reports,
+ * and delivery_logs created during the test run so nothing persists in MongoDB.
+ */
+async function teardownTestArtifacts(db) {
+  if (!db) return;
+  const allTestEmails = Array.from(new Set([TEST_EMAIL, ...FIXED_TEST_EMAILS]));
+  console.log("\n🧹 Teardown: Removing all test artifacts from MongoDB...");
+
+  try {
+    const testUsers = await db
+      .collection("users")
+      .find({ email: { $in: allTestEmails } })
+      .project({ _id: 1 })
+      .toArray();
+    const userObjectIds = testUsers.map((u) => u._id);
+    const userStringIds = testUsers.map((u) => String(u._id));
+    const allUserIds = [...userObjectIds, ...userStringIds, ...TEST_USER_IDS];
+
+    const [usersDel, dsDel, snapsDel, reportsDel, logsDel] = await Promise.all([
+      db.collection("users").deleteMany({ email: { $in: allTestEmails } }),
+      db.collection("datasources").deleteMany({
+        $or: [
+          { userEmail: { $in: allTestEmails } },
+          { userId: { $in: allUserIds } },
+        ],
+      }),
+      db.collection("metric_snapshots").deleteMany({
+        $or: [
+          { userEmail: { $in: allTestEmails } },
+          { userId: { $in: allUserIds } },
+        ],
+      }),
+      db.collection("intelligence_reports").deleteMany({
+        $or: [
+          { userEmail: { $in: allTestEmails } },
+          { userId: { $in: allUserIds } },
+        ],
+      }),
+      db.collection("delivery_logs").deleteMany({
+        $or: [
+          { userEmail: { $in: allTestEmails } },
+          { email: { $in: allTestEmails } },
+        ],
+      }),
+    ]);
+
+    console.log(
+      `  ✅ Teardown complete: deleted ${usersDel.deletedCount} users, ` +
+        `${dsDel.deletedCount} datasources, ${snapsDel.deletedCount} metric_snapshots, ` +
+        `${reportsDel.deletedCount} intelligence_reports, ${logsDel.deletedCount} delivery_logs.`
+    );
+  } catch (cleanupErr) {
+    console.error("  ❌ Teardown error while cleaning test artifacts:", cleanupErr.message);
+  }
+}
+
 async function runTests() {
   console.log("===============================================================");
   console.log("🔍 SHARFLOW AI WEBSITE WATCHDOG — PIPELINE TEST RUNNER");
@@ -38,6 +143,9 @@ async function runTests() {
   console.log("---------------------------------------------------------------\n");
 
   const db = await getDb();
+  enforceTestSafetyGuards(process.env.MONGODB_URI, db.databaseName);
+
+  try {
 
   // ── TEST 1: Common Snapshot Normalization Schema Verification ─────────────
   console.log("🧪 Test 1: Verifying Common Normalized Data Shape");
@@ -585,6 +693,9 @@ async function runTests() {
   console.log("===============================================================");
   console.log("🎉 ALL 5 MONITORING STATE CASES (A through E) VERIFIED!");
   console.log("===============================================================");
+  } finally {
+    await teardownTestArtifacts(db);
+  }
 }
 
 runTests()
