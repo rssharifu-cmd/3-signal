@@ -149,9 +149,91 @@ async function hydrateSession() {
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
+let googleAuthInitialized = false;
+let cachedGoogleClientId = null;
+
+async function initGoogleSignIn() {
+  const container = document.getElementById("google-auth-container");
+  const btnMount = document.getElementById("google-signin-btn");
+  if (!container || !btnMount) return;
+
+  try {
+    if (!cachedGoogleClientId) {
+      const res = await fetch("/api/auth?action=config");
+      if (res.ok) {
+        const data = await res.json();
+        cachedGoogleClientId = data.googleClientId || null;
+      }
+    }
+    if (!cachedGoogleClientId) return;
+
+    // Wait briefly if the async GIS script is still loading
+    let attempts = 0;
+    while ((!window.google || !window.google.accounts || !window.google.accounts.id) && attempts < 25) {
+      await new Promise((r) => setTimeout(r, 120));
+      attempts++;
+    }
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+    if (!googleAuthInitialized) {
+      window.google.accounts.id.initialize({
+        client_id: cachedGoogleClientId,
+        callback: handleGoogleCredentialResponse,
+        ux_mode: "popup",
+      });
+      googleAuthInitialized = true;
+    }
+
+    container.classList.remove("hidden");
+    btnMount.innerHTML = "";
+    window.google.accounts.id.renderButton(btnMount, {
+      theme: "outline",
+      size: "large",
+      shape: "rectangular",
+      text: "continue_with",
+      width: 320,
+    });
+  } catch (err) {
+    console.warn("Google Sign-In init skipped:", err.message);
+  }
+}
+
+async function handleGoogleCredentialResponse(response) {
+  if (!response || !response.credential) {
+    toast("Google sign-in was cancelled or failed.");
+    return;
+  }
+
+  toast("Signing in with Google…");
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "google", credential: response.credential }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.error || "Google sign-in failed.");
+      return;
+    }
+
+    localStorage.setItem(STORAGE.token, data.token);
+    if (data.user?.email) {
+      localStorage.setItem(STORAGE.email, data.user.email);
+    }
+    applyUserToLocalState(data.user);
+
+    closeAuthModal();
+    routeAfterAuth(data.user);
+  } catch {
+    toast("Network error during Google sign-in — please try again.");
+  }
+}
+
 function openAuthModal(tab = "signup") {
   switchAuthTab(tab);
   document.getElementById("auth-modal").classList.add("open");
+  initGoogleSignIn();
 }
 
 function closeAuthModal() {
