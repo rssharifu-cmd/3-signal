@@ -207,9 +207,15 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
       const title = escapeHtml(f.title || f.evidence?.context || f.type || "Anomaly detected");
       const badge = escapeHtml(f.priorityBadge || (f.severity === "critical" ? "P1 · Critical" : "P2 · Warning"));
       const cause = escapeHtml(f.primaryCause || (Array.isArray(f.plausibleCauses) ? f.plausibleCauses[0] : ""));
-      const evidenceText = f.originalEvidence
-        ? escapeHtml(f.originalEvidence.metric ? `${f.originalEvidence.metric}: ${f.originalEvidence.deltaPercent || ""}% change` : f.originalEvidence.context || "")
-        : (f.evidence ? escapeHtml(`${f.evidence.metric || ""}: ${f.evidence.deltaPercent || ""}%`) : "");
+      const evObj = f.originalEvidence || f.evidence || null;
+      const pctVal = evObj ? (evObj.deltaPercent ?? evObj.changePercent ?? null) : null;
+      const evidenceText = evObj
+        ? escapeHtml(
+            pctVal !== null && pctVal !== undefined && pctVal !== ""
+              ? `${evObj.metric || "metric"}: ${pctVal}% change`
+              : (evObj.context || "")
+          )
+        : "";
 
       const actionItem = Array.isArray(f.recommendedActions) && f.recommendedActions.length > 0
         ? (typeof f.recommendedActions[0] === "string" ? f.recommendedActions[0] : f.recommendedActions[0].action)

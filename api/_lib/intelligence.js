@@ -251,6 +251,44 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
           urgency: "immediate",
         },
       ];
+    } else if (f.type === "bing_crawl_issues") {
+      plausibleCauses = [
+        "Broken internal links or deleted pages returning HTTP 404/410 to search crawlers",
+        "Server-side HTTP 5xx errors or timeouts encountered during Bingbot crawl",
+        "Accidental robots.txt disallow rules or noindex directives on live pages",
+      ];
+      primaryCause = "Search engine crawler encountered HTTP errors or indexing blocks on specific URLs";
+      recommendedActions = [
+        {
+          action: "Inspect and resolve the affected URLs reported by Bing Webmaster Tools",
+          detail: "Test each flagged URL for HTTP status errors, redirect chains, or robots.txt blocks.",
+          urgency: "immediate",
+        },
+        {
+          action: "Add 301 redirects for moved pages or restore missing content",
+          detail: "Update internal links pointing to broken URLs so search crawlers can index active pages cleanly.",
+          urgency: "this_week",
+        },
+      ];
+    } else if (f.type === "near_zero_search_visibility") {
+      plausibleCauses = [
+        "Key landing pages are not yet indexed or XML sitemap has not been submitted",
+        "Pages target highly competitive terms without sufficient domain authority or long-tail keyword coverage",
+        "Technical indexing blockers (canonical tags, noindex directives, or thin content) limiting SERP impressions",
+      ];
+      primaryCause = "Minimal search engine indexation or low keyword authority preventing organic SERP impressions";
+      recommendedActions = [
+        {
+          action: "Verify XML sitemap submission and inspect core URLs in Google Search Console & Bing Webmaster Tools",
+          detail: "Confirm your homepage and primary landing pages are indexed and eligible to appear in search results.",
+          urgency: "immediate",
+        },
+        {
+          action: "Publish targeted pages around specific, lower-competition search queries relevant to your audience",
+          detail: "Align page titles, H1 headings, and body copy with concrete search questions your customers ask.",
+          urgency: "this_week",
+        },
+      ];
     } else {
       plausibleCauses = [
         "Traffic redistribution across channels or external platform changes",
@@ -359,6 +397,7 @@ External Research & Context (Official Search Central announcements, industry dis
 ${JSON.stringify(externalResearch, null, 2)}
 ` : ""}
 If external research is provided, incorporate relevant external context (e.g. search updates, competitor movements, community reports) into plausibleCauses and impactAssessment where directly applicable. Never fabricate numbers or sources.
+For "near_zero_search_visibility" findings, treat them as a baseline search indexation/visibility bottleneck (not a sudden traffic drop) and recommend concrete indexing, sitemap, and keyword targeting steps. For "bing_crawl_issues" findings, reference the specific affected URLs and HTTP/crawl issue types from the finding evidence.
 
 Produce a JSON object matching this exact structure:
 {

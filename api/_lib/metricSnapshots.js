@@ -321,9 +321,15 @@ function aggregateDimensions(slice) {
   const queriesMap = new Map();
   const channelsMap = new Map();
   const eventsMap = new Map();
+  let latestCrawlIssues = [];
 
   for (const s of slice) {
     const dims = s.dimensions || {};
+
+    // Crawl Issues (keep latest snapshot's crawlIssues list in the slice)
+    if (Array.isArray(dims.crawlIssues) && dims.crawlIssues.length > 0) {
+      latestCrawlIssues = dims.crawlIssues;
+    }
 
     // Pages
     if (Array.isArray(dims.pages)) {
@@ -404,11 +410,23 @@ function aggregateDimensions(slice) {
   const channels = Array.from(channelsMap.values()).sort((a, b) => b.sessions - a.sessions);
   const events = Array.from(eventsMap.values()).sort((a, b) => b.eventCount - a.eventCount);
 
+  // Deduplicate latestCrawlIssues by URL
+  const seenIssueUrls = new Set();
+  const crawlIssues = [];
+  for (const issue of latestCrawlIssues) {
+    if (!issue || typeof issue !== "object") continue;
+    const urlKey = String(issue.Url || issue.url || JSON.stringify(issue)).toLowerCase().trim();
+    if (seenIssueUrls.has(urlKey)) continue;
+    seenIssueUrls.add(urlKey);
+    crawlIssues.push(issue);
+  }
+
   return {
     pages,
     queries,
     channels,
     events,
+    crawlIssues,
   };
 }
 

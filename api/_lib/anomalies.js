@@ -487,6 +487,117 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
           detectedAt,
         });
       }
+
+      // 3C. Bing Crawl Issues (Per-URL Crawl/Indexation Diagnostics from GetCrawlIssues)
+      const rawCrawlIssues = w7d.currentDimensions?.crawlIssues || [];
+      if (Array.isArray(rawCrawlIssues) && rawCrawlIssues.length > 0) {
+        const normalizedIssues = rawCrawlIssues.map((item) => {
+          const url = item.Url || item.url || "";
+          const httpCode = Number(item.HttpCode ?? item.httpCode ?? 0);
+          const issueRaw = item.Issues ?? item.issues ?? item.IssueType ?? item.issueType ?? "Crawl issue";
+          const issueLabel = Array.isArray(issueRaw) ? issueRaw.join(", ") : String(issueRaw);
+          const isImportantPage = importantPagesList.some((ip) => ip && cleanPath(url).includes(ip)) || cleanPath(url) === "";
+          return { url, httpCode, issueLabel, isImportantPage };
+        }).filter((item) => item.url || item.httpCode || item.issueLabel);
+
+        if (normalizedIssues.length > 0) {
+          const serverErrorCount = normalizedIssues.filter((i) => i.httpCode >= 500).length;
+          const clientErrorCount = normalizedIssues.filter((i) => i.httpCode >= 400 && i.httpCode < 500).length;
+          const affectsPriorityPage = normalizedIssues.some((i) => i.isImportantPage);
+
+          const isCritical = serverErrorCount > 0 || affectsPriorityPage || normalizedIssues.length >= 5;
+          const severity = isCritical ? "critical" : "warning";
+          const confidence = Number(
+            Math.min(0.95, 0.82 + (isCritical ? 0.08 : 0) + Math.min(0.05, normalizedIssues.length * 0.01)).toFixed(2)
+          );
+
+          const sampleUrls = normalizedIssues
+            .slice(0, 3)
+            .map((i) => `${i.url || "URL"}${i.httpCode ? ` (HTTP ${i.httpCode})` : ` (${i.issueLabel})`}`)
+            .join(", ");
+
+          findings.push({
+            id: makeFindingId("bing_crawl_issues", "site", "bing_crawl_issues"),
+            userId,
+            type: "bing_crawl_issues",
+            severity,
+            confidence,
+            scope: affectsPriorityPage ? "page" : "site",
+            evidence: {
+              metric: "crawlIssues",
+              provider: "bing_webmaster",
+              issueCount: normalizedIssues.length,
+              serverErrorCount,
+              clientErrorCount,
+              affectsPriorityPage,
+              affectedUrls: normalizedIssues.slice(0, 10),
+              window: "last7_vs_prior7",
+              context: `Bing Webmaster Tools reported ${normalizedIssues.length} active URL crawl issue${normalizedIssues.length > 1 ? "s" : ""}${serverErrorCount > 0 ? ` (including ${serverErrorCount} HTTP 5xx server error${serverErrorCount > 1 ? "s" : ""})` : ""}: ${sampleUrls}.`,
+            },
+            detectedAt,
+          });
+        }
+      }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 4. NEAR-ZERO SEARCH VISIBILITY (Additive check across usable search providers)
+  // ──────────────────────────────────────────────────────────────────────────
+  const hasSearchTrafficFinding = findings.some((f) =>
+    ["organic_traffic_drop", "ranking_position_drop", "ctr_opportunity", "new_page_traction"].includes(f.type)
+  );
+
+  if (!hasSearchTrafficFinding && (gscWin || bingWin)) {
+    const gsc28 = gscWin?.last28_vs_prior28;
+    const bing28 = bingWin?.last28_vs_prior28;
+
+    const gscDays = gsc28?.currentRange?.snapshotsCount || 0;
+    const bingDays = bing28?.currentRange?.snapshotsCount || 0;
+    const maxSearchDays = Math.max(gscDays, bingDays);
+
+    // Require at least 7 daily snapshots in the 28d window so newly connected sites aren't prematurely flagged
+    if (maxSearchDays >= 7) {
+      const totalClicks =
+        (gsc28?.currentMetrics?.clicks || 0) +
+        (gsc28?.priorMetrics?.clicks || 0) +
+        (bing28?.currentMetrics?.clicks || 0) +
+        (bing28?.priorMetrics?.clicks || 0);
+
+      const totalImpressions =
+        (gsc28?.currentMetrics?.impressions || 0) +
+        (gsc28?.priorMetrics?.impressions || 0) +
+        (bing28?.currentMetrics?.impressions || 0) +
+        (bing28?.priorMetrics?.impressions || 0);
+
+      const bingCrawledPages = bing28?.currentMetrics?.crawledPages || 0;
+      const activeSearchProviders = [
+        gscDays >= 2 ? "Google Search Console" : null,
+        bingDays >= 2 ? "Bing Webmaster Tools" : null,
+      ].filter(Boolean);
+
+      if (totalClicks < 5 && totalImpressions < 100) {
+        findings.push({
+          id: makeFindingId("near_zero_search_visibility", "site", "search_visibility_floor"),
+          userId,
+          type: "near_zero_search_visibility",
+          severity: "warning",
+          confidence: 0.85,
+          scope: "site",
+          evidence: {
+            metric: "impressions",
+            provider: gscDays >= 2 && bingDays >= 2 ? "google_search_console,bing_webmaster" : (gscDays >= 2 ? "google_search_console" : "bing_webmaster"),
+            totalClicks,
+            totalImpressions,
+            evaluatedDays: maxSearchDays,
+            bingCrawledPages,
+            activeSearchProviders,
+            window: "last28_vs_prior28",
+            context: `Across the last ${maxSearchDays} synced days on ${activeSearchProviders.join(" & ")}, your site recorded only ${totalClicks} organic click${totalClicks === 1 ? "" : "s"} and ${totalImpressions} impression${totalImpressions === 1 ? "" : "s"} (below the 5-click / 100-impression baseline visibility floor).`,
+          },
+          detectedAt,
+        });
+      }
     }
   }
 

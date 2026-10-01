@@ -1187,9 +1187,9 @@ function renderWatchdogReportHtml(report) {
   } else if (status === "critical" || status === "critical_attention") {
     statusBadgeClass = "red";
     statusLabel = "Critical Attention Needed";
-  } else if (status === "warning") {
+  } else if (status === "warning" || status === "needs_attention") {
     statusBadgeClass = "amber";
-    statusLabel = "Warning · Metric Shift";
+    statusLabel = "Needs Attention · Actionable Signals";
   } else if (status === "opportunity") {
     statusBadgeClass = "blue";
     statusLabel = "Growth Opportunity";
