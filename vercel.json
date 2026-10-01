@@ -1,6 +1,20 @@
 {
   "version": 2,
   "outputDirectory": ".",
+  "headers": [
+    {
+      "source": "/",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
+      ]
+    },
+    {
+      "source": "/index.html",
+      "headers": [
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/api/auth", "destination": "/api/auth.js" },
     { "source": "/api/datasources", "destination": "/api/datasources.js" },

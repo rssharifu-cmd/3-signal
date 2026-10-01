@@ -56,6 +56,14 @@ function extractToken(req) {
   return null;
 }
 
+function normalizeGoogleClientId(raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) return "";
+  return trimmed.endsWith(".apps.googleusercontent.com")
+    ? trimmed
+    : `${trimmed}.apps.googleusercontent.com`;
+}
+
 // Strip sensitive fields before returning user to client
 function safeUser(user) {
   const { passwordHash, ...rest } = user;
@@ -71,7 +79,7 @@ async function handler(req, res) {
 
   // ── GET /api/auth?action=config — public Google Client ID for GIS button ──
   if (req.method === "GET" && queryAction === "config") {
-    const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim() || null;
+    const googleClientId = normalizeGoogleClientId(process.env.GOOGLE_CLIENT_ID) || null;
     return res.status(200).json({ ok: true, googleClientId });
   }
 
@@ -125,7 +133,8 @@ async function handler(req, res) {
         return res.status(400).json({ error: "Missing Google credential token." });
       }
 
-      const googleClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+      const rawClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+      const googleClientId = normalizeGoogleClientId(rawClientId);
       if (!googleClientId) {
         return res.status(500).json({ error: "GOOGLE_CLIENT_ID is not configured on the server." });
       }
@@ -135,7 +144,7 @@ async function handler(req, res) {
         const googleClient = new OAuth2Client(googleClientId);
         const ticket = await googleClient.verifyIdToken({
           idToken: credential,
-          audience: googleClientId,
+          audience: [googleClientId, rawClientId],
         });
         payload = ticket.getPayload();
       } catch (verifyErr) {
