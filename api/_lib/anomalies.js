@@ -120,7 +120,7 @@ function cleanPath(url) {
  * @param {string} [params.targetDate]
  * @returns {Array<object>} Array of structured findings clearing confidence threshold
  */
-function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfile = {}, targetDate }) {
+function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfile = {}, targetDate, urlInspection = null }) {
   const findings = [];
   const detectedAt = new Date();
 
@@ -594,6 +594,85 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
             activeSearchProviders,
             window: "last28_vs_prior28",
             context: `Across the last ${maxSearchDays} synced days on ${activeSearchProviders.join(" & ")}, your site recorded only ${totalClicks} organic click${totalClicks === 1 ? "" : "s"} and ${totalImpressions} impression${totalImpressions === 1 ? "" : "s"} (below the 5-click / 100-impression baseline visibility floor).`,
+          },
+          detectedAt,
+        });
+      }
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 5. GOOGLE URL INSPECTION FINDINGS (Indexing + Mobile Usability)
+  // ──────────────────────────────────────────────────────────────────────────
+  if (urlInspection && Array.isArray(urlInspection.results) && urlInspection.results.length > 0) {
+    for (const item of urlInspection.results) {
+      const url = item.inspectionUrl || "";
+      if (!url) continue;
+
+      const isRootOrImportant =
+        item.source === "root" ||
+        item.source === "important_page" ||
+        cleanPath(url) === "" ||
+        importantPagesList.some((ip) => ip && cleanPath(url).includes(ip));
+
+      // 5A. Page Not Indexed
+      if (item.verdict && item.verdict !== "PASS" && item.verdict !== "VERDICT_UNSPECIFIED") {
+        const hasIndexingBlock =
+          (item.indexingState && item.indexingState !== "INDEXING_ALLOWED" && item.indexingState !== "INDEXING_STATE_UNSPECIFIED") ||
+          item.robotsTxtState === "DISALLOWED" ||
+          (item.pageFetchState && !["SUCCESSFUL", "PAGE_FETCH_STATE_UNSPECIFIED"].includes(item.pageFetchState));
+
+        const isCritical = isRootOrImportant || Boolean(hasIndexingBlock);
+        const coverageLabel = item.coverageState || item.verdict;
+
+        findings.push({
+          id: makeFindingId("page_not_indexed", "page", url),
+          userId,
+          type: "page_not_indexed",
+          severity: isCritical ? "critical" : "warning",
+          confidence: 0.92,
+          scope: "page",
+          evidence: {
+            subject: url,
+            metric: "indexStatus",
+            provider: "google_search_console",
+            verdict: item.verdict,
+            coverageState: coverageLabel,
+            indexingState: item.indexingState,
+            robotsTxtState: item.robotsTxtState,
+            pageFetchState: item.pageFetchState,
+            lastCrawlTime: item.lastCrawlTime,
+            isPriorityUrl: isRootOrImportant,
+            context: `Google URL Inspection reports ${url} is not indexed (${coverageLabel}; fetch: ${item.pageFetchState || "unknown"}, robots.txt: ${item.robotsTxtState || "unknown"}).`,
+          },
+          detectedAt,
+        });
+      }
+
+      // 5B. Mobile Usability Issue
+      const mobileIssues = Array.isArray(item.mobileUsabilityIssues)
+        ? item.mobileUsabilityIssues.map((iss) => (typeof iss === "string" ? iss : (iss.issueType || iss.message || "Mobile issue")))
+        : [];
+
+      if (item.mobileUsabilityVerdict === "FAIL" || mobileIssues.length > 0) {
+        const isCriticalMobile = isRootOrImportant && mobileIssues.length > 1;
+        const issuesSummary = mobileIssues.length > 0 ? mobileIssues.join(", ") : "Mobile usability failure";
+
+        findings.push({
+          id: makeFindingId("mobile_usability_issue", "page", url),
+          userId,
+          type: "mobile_usability_issue",
+          severity: isCriticalMobile ? "critical" : "warning",
+          confidence: 0.88,
+          scope: "page",
+          evidence: {
+            subject: url,
+            metric: "mobileUsability",
+            provider: "google_search_console",
+            mobileUsabilityVerdict: item.mobileUsabilityVerdict || "FAIL",
+            issues: mobileIssues,
+            isPriorityUrl: isRootOrImportant,
+            context: `Google URL Inspection detected mobile usability issues on ${url}: ${issuesSummary}.`,
           },
           detectedAt,
         });

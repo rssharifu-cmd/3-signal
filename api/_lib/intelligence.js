@@ -289,6 +289,44 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
           urgency: "this_week",
         },
       ];
+    } else if (f.type === "page_not_indexed") {
+      plausibleCauses = [
+        "Google crawled or discovered the URL but excluded it due to low perceived content uniqueness or authority",
+        "Explicit noindex meta tag, X-Robots-Tag header, or robots.txt rule blocking Googlebot indexing",
+        "Canonical tag pointing to a different URL or HTTP fetch/redirect error encountered during crawl",
+      ];
+      primaryCause = "Page is excluded from Google's search index and cannot receive organic search traffic";
+      recommendedActions = [
+        {
+          action: "Review the exact coverage state and canonical/robots directives for this URL in Google Search Console",
+          detail: "Ensure the page returns HTTP 200, has a self-referencing canonical tag, and is not blocked by noindex or robots.txt.",
+          urgency: "immediate",
+        },
+        {
+          action: "Add direct internal links to the affected page and request indexing in Search Console",
+          detail: "Strengthen internal link paths from indexed pages and expand thin or duplicate copy so Google prioritizes indexing.",
+          urgency: "this_week",
+        },
+      ];
+    } else if (f.type === "mobile_usability_issue") {
+      plausibleCauses = [
+        "Fixed-width elements or images overflowing the mobile viewport width",
+        "Interactive buttons or links placed too close together for mobile tap targets",
+        "Base font size or viewport meta configuration rendering text too small to read on mobile",
+      ];
+      primaryCause = "Mobile layout or viewport rendering defects degrading mobile search experience";
+      recommendedActions = [
+        {
+          action: "Fix responsive CSS viewport overflow, font sizing, and tap target spacing on the flagged URL",
+          detail: "Ensure <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> is set and interactive elements have adequate spacing.",
+          urgency: "immediate",
+        },
+        {
+          action: "Re-verify mobile rendering using Chrome DevTools device emulation and Search Console URL Inspection",
+          detail: "Confirm all mobile usability warnings are resolved across standard mobile breakpoints.",
+          urgency: "this_week",
+        },
+      ];
     } else {
       plausibleCauses = [
         "Traffic redistribution across channels or external platform changes",
@@ -397,7 +435,7 @@ External Research & Context (Official Search Central announcements, industry dis
 ${JSON.stringify(externalResearch, null, 2)}
 ` : ""}
 If external research is provided, incorporate relevant external context (e.g. search updates, competitor movements, community reports) into plausibleCauses and impactAssessment where directly applicable. Never fabricate numbers or sources.
-For "near_zero_search_visibility" findings, treat them as a baseline search indexation/visibility bottleneck (not a sudden traffic drop) and recommend concrete indexing, sitemap, and keyword targeting steps. For "bing_crawl_issues" findings, reference the specific affected URLs and HTTP/crawl issue types from the finding evidence.
+For "near_zero_search_visibility" findings, treat them as a baseline search indexation/visibility bottleneck (not a sudden traffic drop) and recommend concrete indexing, sitemap, and keyword targeting steps. For "bing_crawl_issues" findings, reference the specific affected URLs and HTTP/crawl issue types from the finding evidence. For "page_not_indexed" and "mobile_usability_issue" findings, reference the exact inspected URL, Google coverageState/fetch state, or mobile usability issue types from the finding evidence.
 
 Produce a JSON object matching this exact structure:
 {

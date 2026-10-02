@@ -14,6 +14,12 @@
 const { ObjectId } = require("mongodb");
 const { getDb } = require("./db");
 const { fetchGscPerformance } = require("./gsc");
+const {
+  inspectPropertyUrls,
+  saveUrlInspection,
+  loadLatestUrlInspection,
+  isInspectionDue,
+} = require("./gscUrlInspection");
 const { fetchGa4Performance } = require("./ga4");
 const { fetchBingPerformance } = require("./bing");
 const {
@@ -549,6 +555,37 @@ async function generateDailyIntelligence(userId, options = {}) {
   }
 
   // ── 4. DETERMINISTIC ANOMALY DETECTION (STEP 3) ───────────────────────────
+  // Weekly GSC URL Inspection supplement (indexing status + mobile usability)
+  let urlInspectionResult = null;
+  const usableGsc = usableProviders.find((u) => u.provider === "google_search_console");
+  if (usableGsc && usableGsc.propertyRef) {
+    try {
+      urlInspectionResult = await loadLatestUrlInspection(userEmail, usableGsc.propertyRef);
+      if (!options.skipFetch && isInspectionDue(urlInspectionResult)) {
+        const gscWindows = usableWindowsByProvider.google_search_console;
+        const gscPages =
+          gscWindows?.last28_vs_prior28?.currentDimensions?.pages ||
+          gscWindows?.last7_vs_prior7?.currentDimensions?.pages ||
+          [];
+        const inspectedItems = await inspectPropertyUrls(
+          userEmail,
+          usableGsc.propertyRef,
+          user.profile || {},
+          gscPages
+        );
+        urlInspectionResult = await saveUrlInspection(
+          stringUserId,
+          userEmail,
+          usableGsc.propertyRef,
+          inspectedItems
+        );
+      }
+    } catch (inspectErr) {
+      console.warn(`[Watchdog URL Inspection Warning] ${userEmail}:`, inspectErr.message);
+      urlInspectionResult = null;
+    }
+  }
+
   // Analyze ONLY providers with usable comparison data.
   // Missing/failed providers do not generate spurious findings.
   const findings = detectAnomalies({
@@ -557,6 +594,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     comparisonWindows: usableWindowsByProvider,
     userProfile: user.profile || {},
     targetDate,
+    urlInspection: urlInspectionResult,
   });
 
   // ── 5. CONDITIONAL TARGETED EXTERNAL RESEARCH (STEP 4) ────────────────────
