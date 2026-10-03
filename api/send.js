@@ -203,7 +203,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
       </div>
     `;
   } else if (!isStable && findingsList.length > 0) {
-    findingsHtml = findingsList.slice(0, 5).map((f) => {
+    const cardsHtml = findingsList.slice(0, 5).map((f) => {
       const title = escapeHtml(f.title || f.evidence?.context || f.type || "Anomaly detected");
       const badge = escapeHtml(f.priorityBadge || (f.severity === "critical" ? "P1 · Critical" : "P2 · Warning"));
       const cause = escapeHtml(f.primaryCause || (Array.isArray(f.plausibleCauses) ? f.plausibleCauses[0] : ""));
@@ -233,6 +233,12 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
         </div>
       `;
     }).join("");
+
+    const overflowDisclosure = findingsList.length > 5
+      ? `<div style="font-size:12px;color:#64748B;margin-top:4px;margin-bottom:14px;text-align:center;">Showing the top 5 of ${findingsList.length} signals — view the full list on your dashboard.</div>`
+      : "";
+
+    findingsHtml = cardsHtml + overflowDisclosure;
   } else {
     findingsHtml = `
       <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:16px;color:#166534;font-size:14px;line-height:1.6;">

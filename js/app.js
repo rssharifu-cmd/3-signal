@@ -1540,7 +1540,7 @@ function exportReportCSV() {
   const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
 
   const form = typeof getSavedForm === "function" ? getSavedForm() : {};
-  const websiteDomain = report.websiteDomain || form.website || "your-website.com";
+  const websiteDomain = report.websiteUrl || form.websiteUrl || "your-website.com";
   const reportDate = report.targetDate || new Date().toISOString().split("T")[0];
 
   // Helper for CSV escaping (RFC 4180 + Excel DDE / formula injection protection)

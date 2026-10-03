@@ -152,7 +152,15 @@ function buildNormalStateInterpretation({ usableProviders = [], unusableProvider
  * @returns {object}
  */
 function buildDeterministicInterpretation(findings, userContext, externalResearch = []) {
-  const ranked = findings.map((f, idx) => {
+  // Sort findings by severity descending (critical > warning > opportunity > info) before mapping
+  const severityOrder = { critical: 0, warning: 1, opportunity: 2, info: 3 };
+  const sortedFindings = [...findings].sort((a, b) => {
+    const diff = (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99);
+    if (diff !== 0) return diff;
+    return (b.confidence || 0) - (a.confidence || 0);
+  });
+
+  const ranked = sortedFindings.map((f, idx) => {
     let priorityBadge = "P3 · Medium";
     let priorityRank = idx + 1;
     let plausibleCauses = [];
@@ -163,8 +171,12 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
       priorityBadge = "P1 · Immediate Action";
     } else if (f.severity === "warning") {
       priorityBadge = "P2 · High Priority";
-    } else {
+    } else if (f.severity === "opportunity") {
       priorityBadge = "P3 · Opportunity";
+    } else if (f.severity === "info") {
+      priorityBadge = "P4 · Informational";
+    } else {
+      priorityBadge = "P3 · Medium";
     }
 
     if (f.type === "organic_traffic_drop") {
@@ -357,15 +369,32 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
     };
   });
 
-  const criticalCount = findings.filter((f) => f.severity === "critical").length;
-  const warningCount = findings.filter((f) => f.severity === "warning").length;
+  const criticalCount = sortedFindings.filter((f) => f.severity === "critical").length;
+  const warningCount = sortedFindings.filter((f) => f.severity === "warning").length;
+  const actionableCount = sortedFindings.filter((f) => f.severity !== "info").length;
+
+  // Deduplicate flatMapped action strings (case-insensitive trim compare) BEFORE applying .slice(0, 3)
+  const rawActions = ranked.flatMap((r) => (r.recommendedActions || []).map((a) => (typeof a === "string" ? a : a.action))).filter(Boolean);
+  const seenActions = new Set();
+  const dedupedActions = [];
+  for (const act of rawActions) {
+    const key = act.toLowerCase().trim();
+    if (!seenActions.has(key)) {
+      seenActions.add(key);
+      dedupedActions.push(act);
+    }
+  }
+
+  const headline = actionableCount > 0
+    ? `${actionableCount} actionable signal${actionableCount > 1 ? "s" : ""} detected across your website`
+    : `All systems normal · ${sortedFindings.length} informational update${sortedFindings.length > 1 ? "s" : ""} recorded`;
 
   return {
-    status: criticalCount > 0 ? "critical_attention" : "needs_attention",
-    headline: `${findings.length} actionable signal${findings.length > 1 ? "s" : ""} detected across your website`,
+    status: criticalCount > 0 ? "critical_attention" : (warningCount > 0 ? "needs_attention" : "stable"),
+    headline,
     summary: `Watchdog identified ${criticalCount} critical and ${warningCount} notable changes requiring attention. Focus on high-priority ranking and traffic signals first.`,
     priorityRankedFindings: ranked,
-    recommendedActions: ranked.flatMap((r) => r.recommendedActions.map((a) => a.action)).slice(0, 3),
+    recommendedActions: dedupedActions.slice(0, 3),
     externalResearch: externalResearch || [],
     interpretedAt: new Date(),
     aiCallSkipped: false,

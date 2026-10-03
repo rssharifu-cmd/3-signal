@@ -106,7 +106,39 @@ async function fetchSitemapUrls(rootUrl, maxCount = 5) {
  * 4) Fallback to sitemap.xml (up to 5) if < 10 URLs and 0-impression site
  */
 async function selectUrlsToInspect(propertyRef, userProfile = {}, currentDimensionsPages = []) {
-  const rootUrl = resolveRootUrl(propertyRef, userProfile);
+  let rootUrl = "";
+
+  // 1. Check currentDimensionsPages first: extract the origin (protocol + host) from the most common domain
+  // among real pages Google serves in search results — trust them over the raw connected property string.
+  if (Array.isArray(currentDimensionsPages) && currentDimensionsPages.length > 0) {
+    const originCounts = new Map();
+    for (const p of currentDimensionsPages) {
+      const raw = p?.page || p?.url || "";
+      if (typeof raw === "string" && (raw.startsWith("http://") || raw.startsWith("https://"))) {
+        try {
+          const u = new URL(raw);
+          const orig = `${u.origin}/`;
+          originCounts.set(orig, (originCounts.get(orig) || 0) + 1);
+        } catch {}
+      }
+    }
+    if (originCounts.size > 0) {
+      let topOrigin = "";
+      let maxCount = -1;
+      for (const [orig, count] of originCounts.entries()) {
+        if (count > maxCount) {
+          maxCount = count;
+          topOrigin = orig;
+        }
+      }
+      rootUrl = topOrigin;
+    }
+  }
+
+  // 2. Fall back to resolveRootUrl(propertyRef, userProfile) only when currentDimensionsPages yielded no origin
+  if (!rootUrl) {
+    rootUrl = resolveRootUrl(propertyRef, userProfile);
+  }
   if (!rootUrl) return [];
 
   const selected = [];

@@ -622,15 +622,30 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
           item.robotsTxtState === "DISALLOWED" ||
           (item.pageFetchState && !["SUCCESSFUL", "PAGE_FETCH_STATE_UNSPECIFIED"].includes(item.pageFetchState));
 
-        const isCritical = isRootOrImportant || Boolean(hasIndexingBlock);
+        // Defense in depth: if coverageState indicates a redirect pointing to an indexed target (verdict === "PASS"),
+        // downgrade to informational ("info") so it does not count toward actionable-signal alert counts.
+        const isRedirectState = /redirect/i.test(item.coverageState || "") || /redirect/i.test(item.pageFetchState || "");
+        const targetUrl = item.googleCanonical || item.userCanonical || "";
+        const targetResult = targetUrl
+          ? urlInspection.results.find((r) => r.inspectionUrl && cleanPath(r.inspectionUrl) === cleanPath(targetUrl))
+          : null;
+        const targetIsIndexed = targetResult ? targetResult.verdict === "PASS" : false;
+
+        let severity = "warning";
+        if (isRedirectState && targetIsIndexed) {
+          severity = "info";
+        } else if (isRootOrImportant || Boolean(hasIndexingBlock)) {
+          severity = "critical";
+        }
+
         const coverageLabel = item.coverageState || item.verdict;
 
         findings.push({
           id: makeFindingId("page_not_indexed", "page", url),
           userId,
           type: "page_not_indexed",
-          severity: isCritical ? "critical" : "warning",
-          confidence: 0.92,
+          severity,
+          confidence: severity === "info" ? 0.75 : 0.92,
           scope: "page",
           evidence: {
             subject: url,
@@ -643,7 +658,10 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
             pageFetchState: item.pageFetchState,
             lastCrawlTime: item.lastCrawlTime,
             isPriorityUrl: isRootOrImportant,
-            context: `Google URL Inspection reports ${url} is not indexed (${coverageLabel}; fetch: ${item.pageFetchState || "unknown"}, robots.txt: ${item.robotsTxtState || "unknown"}).`,
+            googleCanonical: item.googleCanonical || "",
+            context: severity === "info"
+              ? `Google URL Inspection reports ${url} redirects to indexed canonical URL ${targetUrl || "destination"}.`
+              : `Google URL Inspection reports ${url} is not indexed (${coverageLabel}; fetch: ${item.pageFetchState || "unknown"}, robots.txt: ${item.robotsTxtState || "unknown"}).`,
           },
           detectedAt,
         });
