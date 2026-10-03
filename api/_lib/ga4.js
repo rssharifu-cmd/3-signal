@@ -25,9 +25,9 @@ const AI_REFERRAL_DOMAINS = [
   { domain: "perplexity.ai", platform: "Perplexity" },
   { domain: "claude.ai", platform: "Claude" },
   { domain: "anthropic.com", platform: "Claude" },
-  { domain: "copilot.microsoft.com", platform: "Microsoft Copilot" },
-  { domain: "bing.com/chat", platform: "Microsoft Copilot" },
-  { domain: "gemini.google.com", platform: "Google Gemini" },
+  { domain: "copilot.microsoft.com", platform: "Copilot" },
+  { domain: "bing.com/chat", platform: "Copilot" },
+  { domain: "gemini.google.com", platform: "Gemini" },
   { domain: "poe.com", platform: "Poe" },
   { domain: "meta.ai", platform: "Meta AI" },
   { domain: "groq.com", platform: "Groq" },
@@ -51,9 +51,19 @@ function classifyAiReferral(source = "", medium = "") {
     }
   }
 
-  // Also check if medium or source explicitly mentions ai search
-  if (med === "ai" || med === "ai-search" || src === "chatgpt" || src === "perplexity" || src === "claude") {
-    const platform = src.includes("perplexity") ? "Perplexity" : (src.includes("claude") ? "Claude" : "ChatGPT");
+  // Known source keywords
+  if (src.includes("chatgpt")) return { isAi: true, platform: "ChatGPT" };
+  if (src.includes("perplexity")) return { isAi: true, platform: "Perplexity" };
+  if (src.includes("claude")) return { isAi: true, platform: "Claude" };
+  if (src.includes("copilot")) return { isAi: true, platform: "Copilot" };
+  if (src.includes("gemini")) return { isAi: true, platform: "Gemini" };
+
+  // For unknown sources with utm_medium=ai or ai-search, use the actual source name or "AI Referral"
+  if (med === "ai" || med === "ai-search" || med.includes("ai-search") || med.includes("ai_search")) {
+    const rawSource = String(source || "").trim();
+    const platform = rawSource && rawSource !== "(direct)" && rawSource !== "(not set)"
+      ? rawSource.charAt(0).toUpperCase() + rawSource.slice(1)
+      : "AI Referral";
     return { isAi: true, platform };
   }
 

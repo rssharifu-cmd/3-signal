@@ -14,6 +14,40 @@
  */
 
 require("dotenv").config();
+
+// Enforce test database isolation before database connection is initialized
+function resolveTestMongoUri() {
+  if (process.env.MONGODB_URI_TEST && process.env.MONGODB_URI_TEST.trim()) {
+    return process.env.MONGODB_URI_TEST.trim();
+  }
+  const baseUri = (process.env.MONGODB_URI || "").trim();
+  if (!baseUri) return "";
+
+  try {
+    const [mainPart, queryPart] = baseUri.split("?");
+    const lastSlashIdx = mainPart.lastIndexOf("/");
+    const protocolEndIdx = mainPart.indexOf("://");
+    if (protocolEndIdx !== -1 && lastSlashIdx > protocolEndIdx + 2) {
+      const existingDb = mainPart.slice(lastSlashIdx + 1);
+      const prefix = mainPart.slice(0, lastSlashIdx);
+      const testDbName = existingDb
+        ? (existingDb.endsWith("_test") ? existingDb : `${existingDb}_test`)
+        : "sharflow_test";
+      return `${prefix}/${testDbName}${queryPart ? `?${queryPart}` : ""}`;
+    } else {
+      const testDbName = "sharflow_test";
+      return `${mainPart}/${testDbName}${queryPart ? `?${queryPart}` : ""}`;
+    }
+  } catch {
+    return baseUri;
+  }
+}
+
+const testMongoUri = resolveTestMongoUri();
+if (testMongoUri) {
+  process.env.MONGODB_URI = testMongoUri;
+}
+
 const { getDb } = require("../api/_lib/db");
 const { fetchGscPerformance, getDefaultDateRange } = require("../api/_lib/gsc");
 const { fetchGa4Performance } = require("../api/_lib/ga4");
@@ -43,22 +77,25 @@ const TEST_USER_IDS = [
 
 /**
  * Verifies that running this script is explicitly authorized and cannot
- * accidentally overwrite a real user account.
+ * accidentally overwrite a real user account or target a production database.
  */
 function enforceTestSafetyGuards(mongoUri, dbName) {
   const uriStr = String(mongoUri || "");
-  // Extract database path segment from URI (note: Atlas default dbName is "test" when URI has no path)
   const uriPathMatch = uriStr.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^?]*)/i);
   const explicitUriDb = (uriPathMatch && uriPathMatch[1] ? uriPathMatch[1] : "").trim();
-  const isDedicatedTestOrStagingDb = /(test|staging)/i.test(explicitUriDb) && explicitUriDb.toLowerCase() !== "test";
+  const isDedicatedTestOrStagingDb =
+    /(test|staging)/i.test(dbName) ||
+    /(test|staging)/i.test(explicitUriDb) ||
+    Boolean(process.env.MONGODB_URI_TEST);
 
   if (!isDedicatedTestOrStagingDb) {
-    console.warn("⚠️  WARNING: MONGODB_URI does not point to an isolated test/staging database");
-    console.warn(`   (connected dbName="${dbName}", explicit URI db="${explicitUriDb || "<default>"}").`);
-    console.warn("   Running this script writes temporary test records to the target database.");
+    console.error("\n🛑 SAFETY GUARD BLOCKED EXECUTION:");
+    console.error(`   Target database "${dbName}" is not an isolated test/staging database.`);
+    console.error("   Tests must never write to the production database.\n");
+    process.exit(1);
   }
 
-  if (process.env.ALLOW_PROD_TEST_WRITES !== "true") {
+  if (process.env.ALLOW_PROD_TEST_WRITES !== "true" && !process.env.MONGODB_URI_TEST) {
     console.error("\n🛑 SAFETY GUARD BLOCKED EXECUTION:");
     console.error("   Refusing to write test fixtures to MongoDB without explicit confirmation.");
     console.error("   To run this test suite (with automatic teardown), set:");
