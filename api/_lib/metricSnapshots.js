@@ -209,9 +209,24 @@ function aggregateMetrics(slice) {
       position: 0,
       sessions: 0,
       users: 0,
+      totalUsers: 0,
+      newUsers: 0,
+      returningUsers: 0,
       pageViews: 0,
       conversions: 0,
       bounceRate: 0,
+      engagementRate: null,
+      averageEngagementTime: 0,
+      ecommerceConfigured: false,
+      viewItemCount: null,
+      addToCartCount: null,
+      checkoutCount: null,
+      purchaseCount: null,
+      revenue: null,
+      addToCartRate: null,
+      checkoutRate: null,
+      purchaseConversionRate: null,
+      checkoutToPurchaseRate: null,
       crawledPages: 0,
       crawlErrors: 0,
     };
@@ -222,11 +237,24 @@ function aggregateMetrics(slice) {
   let sumPositionImp = 0;
   let totalSessions = 0;
   let totalUsers = 0;
+  let totalNewUsers = 0;
+  let totalReturningUsers = 0;
   let totalPageViews = 0;
   let totalConversions = 0;
   let sumBounceSessions = 0;
+  let sumEngagementSessions = 0;
+  let hasEngagement = false;
+  let sumEngageTimeSessions = 0;
   let totalCrawledPages = 0;
   let totalCrawlErrors = 0;
+
+  // E-commerce tracking
+  let isEcomConfigured = false;
+  let totalViewItems = 0;
+  let totalAddToCart = 0;
+  let totalCheckouts = 0;
+  let totalPurchases = 0;
+  let totalRevenue = 0;
 
   for (const item of slice) {
     const m = item.metrics || {};
@@ -237,13 +265,34 @@ function aggregateMetrics(slice) {
     } else if (m.position) {
       sumPositionImp += m.position;
     }
-    totalSessions += m.sessions || 0;
-    totalUsers += m.users || 0;
+    const sess = m.sessions || 0;
+    totalSessions += sess;
+    totalUsers += m.users || m.totalUsers || 0;
+    totalNewUsers += m.newUsers || 0;
+    totalReturningUsers += m.returningUsers || 0;
     totalPageViews += m.pageViews || 0;
     totalConversions += m.conversions || 0;
-    if (m.bounceRate && m.sessions) {
-      sumBounceSessions += m.bounceRate * m.sessions;
+
+    if (m.bounceRate && sess) {
+      sumBounceSessions += m.bounceRate * sess;
     }
+    if (m.engagementRate !== null && m.engagementRate !== undefined && sess) {
+      hasEngagement = true;
+      sumEngagementSessions += m.engagementRate * sess;
+    }
+    if (m.averageEngagementTime && sess) {
+      sumEngageTimeSessions += m.averageEngagementTime * sess;
+    }
+
+    if (m.ecommerceConfigured === true || m.purchaseCount !== null || m.revenue !== null || m.addToCartCount !== null) {
+      isEcomConfigured = true;
+      totalViewItems += m.viewItemCount || 0;
+      totalAddToCart += m.addToCartCount || 0;
+      totalCheckouts += m.checkoutCount || 0;
+      totalPurchases += m.purchaseCount || 0;
+      totalRevenue += m.revenue || 0;
+    }
+
     totalCrawledPages += m.crawledPages || 0;
     totalCrawlErrors += m.crawlErrors || 0;
   }
@@ -251,6 +300,14 @@ function aggregateMetrics(slice) {
   const avgCtr = totalImpressions > 0 ? totalClicks / totalImpressions : 0;
   const avgPos = totalImpressions > 0 ? sumPositionImp / totalImpressions : (slice.length > 0 ? sumPositionImp / slice.length : 0);
   const avgBounce = totalSessions > 0 ? sumBounceSessions / totalSessions : 0;
+  const avgEngagementRate = hasEngagement && totalSessions > 0 ? Number((sumEngagementSessions / totalSessions).toFixed(4)) : null;
+  const avgEngagementTime = totalSessions > 0 ? Number((sumEngageTimeSessions / totalSessions).toFixed(1)) : 0;
+
+  // Funnel Rates
+  const addToCartRate = isEcomConfigured && totalSessions > 0 && totalAddToCart > 0 ? Number(((totalAddToCart / totalSessions) * 100).toFixed(2)) : (isEcomConfigured ? 0 : null);
+  const checkoutRate = isEcomConfigured && totalSessions > 0 && totalCheckouts > 0 ? Number(((totalCheckouts / totalSessions) * 100).toFixed(2)) : (isEcomConfigured ? 0 : null);
+  const purchaseConversionRate = isEcomConfigured && totalSessions > 0 && totalPurchases > 0 ? Number(((totalPurchases / totalSessions) * 100).toFixed(2)) : (isEcomConfigured ? 0 : null);
+  const checkoutToPurchaseRate = isEcomConfigured && totalCheckouts > 0 && totalPurchases > 0 ? Number(((totalPurchases / totalCheckouts) * 100).toFixed(2)) : (isEcomConfigured ? 0 : null);
 
   return {
     count: slice.length,
@@ -260,9 +317,25 @@ function aggregateMetrics(slice) {
     position: Number(avgPos.toFixed(1)),
     sessions: totalSessions,
     users: totalUsers,
+    totalUsers,
+    newUsers: totalNewUsers,
+    returningUsers: totalReturningUsers,
     pageViews: totalPageViews,
     conversions: totalConversions,
     bounceRate: Number(avgBounce.toFixed(4)),
+    engagementRate: avgEngagementRate,
+    averageEngagementTime: avgEngagementTime,
+    // E-Commerce
+    ecommerceConfigured: isEcomConfigured,
+    viewItemCount: isEcomConfigured ? totalViewItems : null,
+    addToCartCount: isEcomConfigured ? totalAddToCart : null,
+    checkoutCount: isEcomConfigured ? totalCheckouts : null,
+    purchaseCount: isEcomConfigured ? totalPurchases : null,
+    revenue: isEcomConfigured ? Number(totalRevenue.toFixed(2)) : null,
+    addToCartRate,
+    checkoutRate,
+    purchaseConversionRate,
+    checkoutToPurchaseRate,
     crawledPages: totalCrawledPages,
     crawlErrors: totalCrawlErrors,
   };
@@ -283,16 +356,41 @@ function computeChanges(curr, prior) {
     "position",
     "sessions",
     "users",
+    "totalUsers",
+    "newUsers",
+    "returningUsers",
     "pageViews",
     "conversions",
     "bounceRate",
+    "engagementRate",
+    "averageEngagementTime",
+    "viewItemCount",
+    "addToCartCount",
+    "checkoutCount",
+    "purchaseCount",
+    "revenue",
+    "addToCartRate",
+    "checkoutRate",
+    "purchaseConversionRate",
+    "checkoutToPurchaseRate",
     "crawledPages",
     "crawlErrors",
   ];
 
   for (const m of metrics) {
-    const cVal = curr[m] || 0;
-    const pVal = prior[m] || 0;
+    const cVal = curr[m];
+    const pVal = prior[m];
+
+    if (cVal === null || cVal === undefined || pVal === null || pVal === undefined) {
+      diff[m] = {
+        current: cVal ?? null,
+        prior: pVal ?? null,
+        absolute: null,
+        percent: null,
+      };
+      continue;
+    }
+
     const absolute = Number((cVal - pVal).toFixed(2));
     let percent = 0;
     if (pVal !== 0) {
@@ -312,7 +410,7 @@ function computeChanges(curr, prior) {
 }
 
 /**
- * Aggregates dimensions across a date window (pages, queries, channels, events).
+ * Aggregates dimensions across a date window (pages, queries, channels, events, aiReferrals, landingPages).
  * @param {Array<object>} slice
  * @returns {object}
  */
@@ -320,7 +418,10 @@ function aggregateDimensions(slice) {
   const pagesMap = new Map();
   const queriesMap = new Map();
   const channelsMap = new Map();
+  const aiReferralsMap = new Map();
+  const landingPagesMap = new Map();
   const eventsMap = new Map();
+  const devicesMap = new Map();
   let latestCrawlIssues = [];
 
   for (const s of slice) {
@@ -349,6 +450,22 @@ function aggregateDimensions(slice) {
       }
     }
 
+    // Landing Pages
+    if (Array.isArray(dims.landingPages)) {
+      for (const lp of dims.landingPages) {
+        const key = lp.page || lp.pagePath || "/";
+        const existing = landingPagesMap.get(key) || { page: key, sessions: 0, users: 0, pageViews: 0, bounceRateSum: 0, count: 0 };
+        existing.sessions += lp.sessions || 0;
+        existing.users += lp.users || 0;
+        existing.pageViews += lp.pageViews || 0;
+        if (lp.bounceRate !== undefined) {
+          existing.bounceRateSum += lp.bounceRate;
+          existing.count++;
+        }
+        landingPagesMap.set(key, existing);
+      }
+    }
+
     // Queries
     if (Array.isArray(dims.queries)) {
       for (const q of dims.queries) {
@@ -369,10 +486,21 @@ function aggregateDimensions(slice) {
     if (Array.isArray(dims.trafficSources)) {
       for (const ts of dims.trafficSources) {
         const channel = ts.channel || `${ts.source} / ${ts.medium}`;
-        const existing = channelsMap.get(channel) || { channel, sessions: 0, users: 0 };
+        const existing = channelsMap.get(channel) || { channel, source: ts.source, medium: ts.medium, sessions: 0, users: 0 };
         existing.sessions += ts.sessions || 0;
         existing.users += ts.users || 0;
         channelsMap.set(channel, existing);
+      }
+    }
+
+    // Verified AI Referrals
+    if (Array.isArray(dims.aiReferrals)) {
+      for (const ai of dims.aiReferrals) {
+        const key = `${ai.platform || ai.source}`;
+        const existing = aiReferralsMap.get(key) || { platform: ai.platform || "AI Referral", source: ai.source, medium: ai.medium, sessions: 0, users: 0 };
+        existing.sessions += ai.sessions || 0;
+        existing.users += ai.users || 0;
+        aiReferralsMap.set(key, existing);
       }
     }
 
@@ -384,6 +512,16 @@ function aggregateDimensions(slice) {
         const existing = eventsMap.get(key) || { eventName: key, eventCount: 0 };
         existing.eventCount += ev.eventCount || 0;
         eventsMap.set(key, existing);
+      }
+    }
+
+    // Devices
+    if (Array.isArray(dims.devices)) {
+      for (const dev of dims.devices) {
+        const key = dev.device || "desktop";
+        const existing = devicesMap.get(key) || { device: key, sessions: 0 };
+        existing.sessions += dev.sessions || 0;
+        devicesMap.set(key, existing);
       }
     }
   }
@@ -399,6 +537,14 @@ function aggregateDimensions(slice) {
     sessions: p.sessions,
   })).sort((a, b) => b.clicks - a.clicks || b.pageViews - a.pageViews);
 
+  const landingPages = Array.from(landingPagesMap.values()).map((lp) => ({
+    page: lp.page,
+    sessions: lp.sessions,
+    users: lp.users,
+    pageViews: lp.pageViews,
+    bounceRate: lp.count > 0 ? Number((lp.bounceRateSum / lp.count).toFixed(4)) : 0,
+  })).sort((a, b) => b.sessions - a.sessions);
+
   const queries = Array.from(queriesMap.values()).map((q) => ({
     query: q.query,
     clicks: q.clicks,
@@ -408,7 +554,9 @@ function aggregateDimensions(slice) {
   })).sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
 
   const channels = Array.from(channelsMap.values()).sort((a, b) => b.sessions - a.sessions);
+  const aiReferrals = Array.from(aiReferralsMap.values()).sort((a, b) => b.sessions - a.sessions);
   const events = Array.from(eventsMap.values()).sort((a, b) => b.eventCount - a.eventCount);
+  const devices = Array.from(devicesMap.values()).sort((a, b) => b.sessions - a.sessions);
 
   // Deduplicate latestCrawlIssues by URL
   const seenIssueUrls = new Set();
@@ -423,9 +571,12 @@ function aggregateDimensions(slice) {
 
   return {
     pages,
+    landingPages,
     queries,
     channels,
+    aiReferrals,
     events,
+    devices,
     crawlIssues,
   };
 }

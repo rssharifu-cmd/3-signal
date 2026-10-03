@@ -652,14 +652,60 @@ async function generateDailyIntelligence(userId, options = {}) {
 
   const sourceEvidence = [
     ...usableProviders.map((s) => {
-      if (s.provider === "google_search_console") return "Google Search Console (Verified organic search data)";
-      if (s.provider === "google_analytics") return "Google Analytics 4 (Verified traffic & conversion data)";
-      if (s.provider === "bing_webmaster" || s.provider === "bing") return "Bing Webmaster Tools (Verified search indexing data)";
+      if (s.provider === "google_analytics") return "Google Analytics 4 (Primary e-commerce & traffic intelligence)";
+      if (s.provider === "google_search_console") return "Google Search Console (Secondary organic search diagnostics)";
+      if (s.provider === "bing_webmaster" || s.provider === "bing") return "Bing Webmaster Tools (Secondary search indexing diagnostics)";
       return s.name || s.provider;
     }),
     ...unusableProviders.map((u) => `${u.name} (Unavailable: ${u.reason})`),
     ...(externalResearch.length > 0 ? ["External Research Layer (Official Search Central, community webmaster reports)"] : []),
   ];
+
+  // ── 7.5 ASSEMBLE STORE PERFORMANCE SUMMARY (GA4 PRIMARY) ─────────────────
+  const ga4Windows = usableWindowsByProvider.google_analytics || comparisonWindowsByProvider.google_analytics || null;
+  let storePerformance = null;
+  if (ga4Windows) {
+    const todayWin = ga4Windows.today_vs_yesterday;
+    const weekWin = ga4Windows.last7_vs_prior7;
+    const latestMetrics = todayWin?.currentMetrics || weekWin?.currentMetrics || null;
+    const changes = todayWin?.changes || weekWin?.changes || {};
+    const dims = todayWin?.currentDimensions || weekWin?.currentDimensions || {};
+
+    if (latestMetrics) {
+      storePerformance = {
+        configured: Boolean(latestMetrics.ecommerceConfigured),
+        sessions: latestMetrics.sessions || 0,
+        users: latestMetrics.users || latestMetrics.totalUsers || 0,
+        newUsers: latestMetrics.newUsers || 0,
+        engagementRate: latestMetrics.engagementRate !== null ? latestMetrics.engagementRate : null,
+        averageEngagementTime: latestMetrics.averageEngagementTime || 0,
+        bounceRate: latestMetrics.bounceRate || 0,
+        // E-commerce Funnel (null when tracking unconfigured)
+        viewItemCount: latestMetrics.viewItemCount,
+        addToCartCount: latestMetrics.addToCartCount,
+        checkoutCount: latestMetrics.checkoutCount,
+        purchaseCount: latestMetrics.purchaseCount,
+        revenue: latestMetrics.revenue,
+        // Funnel Rates (%)
+        addToCartRate: latestMetrics.addToCartRate,
+        checkoutRate: latestMetrics.checkoutRate,
+        purchaseConversionRate: latestMetrics.purchaseConversionRate,
+        checkoutToPurchaseRate: latestMetrics.checkoutToPurchaseRate,
+        // Window Changes
+        changes: {
+          revenue: changes.revenue || null,
+          purchases: changes.purchaseCount || null,
+          checkouts: changes.checkoutCount || null,
+          cartAdds: changes.addToCartCount || null,
+          sessions: changes.sessions || null,
+        },
+        // Attributed Channels & Verified AI Referrals
+        topChannels: (dims.channels || []).slice(0, 5),
+        aiReferrals: (dims.aiReferrals || []).slice(0, 5),
+        landingPages: (dims.landingPages || []).slice(0, 5),
+      };
+    }
+  }
 
   const report = {
     reportId: String(reportId),
@@ -671,6 +717,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     websiteUrl,
     monitoringStatus: "active",
     status: intelligence.status || (findings.length === 0 ? "stable" : "warning"),
+    storePerformance,
     activeSources: activeSourcesWithProperty.map((s) => {
       const isUsable = usableProviders.some((u) => u.provider === s.provider);
       const fetchErr = fetchErrors.find((e) => e.provider === s.provider);

@@ -250,7 +250,7 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
         "Form submission script error or broken button following recent site update",
         "Page speed regression on high-converting mobile templates",
       ];
-      primaryCause = "Tracking failure or user conversion path friction";
+      primaryCause = "Possible tracking failure or conversion path friction (investigate event tracking)";
       recommendedActions = [
         {
           action: "Submit a live test conversion in GA4 DebugView",
@@ -261,6 +261,96 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
           action: "Test form functionality and mobile responsiveness across devices",
           detail: "Ensure no JavaScript errors prevent visitors from completing checkout or lead capture.",
           urgency: "immediate",
+        },
+      ];
+    } else if (f.type === "ecommerce_revenue_drop") {
+      plausibleCauses = [
+        "Payment gateway outage, elevated card decline rate, or checkout script failure",
+        "Higher shipping rates or newly revealed checkout fees increasing shopper abandonment",
+        "Out-of-stock top-selling SKUs or promotional discount campaign expiration",
+        "Drop in high-intent paid or organic product landing page traffic",
+      ];
+      primaryCause = "Hypothesis: Payment gateway disruption, pricing friction, or inventory stockouts may have suppressed completed orders";
+      recommendedActions = [
+        {
+          action: "Verify payment gateway status and recent error logs in Shopify/Stripe/WooCommerce",
+          detail: "Check for unexpected payment declines, webhook delays, or gateway script errors.",
+          urgency: "immediate",
+        },
+        {
+          action: "Audit top revenue-generating product pages for pricing, shipping disclosures, and stock availability",
+          detail: "Confirm top items are in stock and checkout pricing displays correctly without unexpected fees.",
+          urgency: "immediate",
+        },
+      ];
+    } else if (f.type === "checkout_to_purchase_drop") {
+      plausibleCauses = [
+        "Payment gateway error or technical friction on the final payment submission step",
+        "Unexpected shipping costs, taxes, or delivery time estimates disclosed at checkout",
+        "Mobile autofill or coupon code validation errors blocking order completion",
+      ];
+      primaryCause = "Hypothesis: Shoppers initiated checkout but dropped off prior to order confirmation, suggesting payment or cost friction";
+      recommendedActions = [
+        {
+          action: "Execute a test order through the entire checkout flow on both mobile and desktop",
+          detail: "Verify shipping rate calculation, payment processing, and confirmation redirect work seamlessly.",
+          urgency: "immediate",
+        },
+        {
+          action: "Inspect abandoned checkout logs to identify where shoppers are exiting the funnel",
+          detail: "Review customer exit steps (shipping info vs. payment entry) to isolate the drop-off point.",
+          urgency: "immediate",
+        },
+      ];
+    } else if (f.type === "add_to_cart_drop") {
+      plausibleCauses = [
+        "Add-to-cart button script conflict, theme update bug, or sticky cart failure",
+        "Product variant selection issue (e.g. size/color buttons not registering)",
+        "Price increase or uncompetitive product pricing compared to market alternatives",
+      ];
+      primaryCause = "Hypothesis: Technical button friction or shopper hesitation on product detail pages";
+      recommendedActions = [
+        {
+          action: "Test add-to-cart functionality across multiple product categories on mobile and desktop",
+          detail: "Ensure variant selection, cart drawer opening, and inventory checks execute without error.",
+          urgency: "immediate",
+        },
+        {
+          action: "Verify product page load speed and above-the-fold call-to-action visibility",
+          detail: "Check that product pricing, buy buttons, and key trust badges load instantly on mobile.",
+          urgency: "this_week",
+        },
+      ];
+    } else if (f.type === "landing_page_engagement_drop") {
+      plausibleCauses = [
+        "Layout shift or slow asset load times on key mobile landing pages",
+        "Disconnection between ad/search messaging and landing page product offerings",
+        "Broken product links or missing featured items on top entry pages",
+      ];
+      primaryCause = "Hypothesis: Shopper bounce or exit rate increase on top landing pages";
+      recommendedActions = [
+        {
+          action: "Audit top entry pages in mobile browser to test layout stability and load speed",
+          detail: "Confirm headline products, images, and navigation render cleanly without layout shift.",
+          urgency: "immediate",
+        },
+        {
+          action: "Check traffic acquisition source quality for the affected landing pages",
+          detail: "Ensure inbound campaigns target high-intent shopper queries matching page content.",
+          urgency: "this_week",
+        },
+      ];
+    } else if (f.type === "verified_ai_referral_shift") {
+      plausibleCauses = [
+        "AI conversational assistant cited or linked store product pages in response to user product queries",
+        "Changes in search engine AI overview citations or conversational indexing for store items",
+      ];
+      primaryCause = "Verified traffic change attributed to AI conversational search or assistant referral";
+      recommendedActions = [
+        {
+          action: "Inspect which store products or landing pages were visited via AI referral traffic",
+          detail: "Optimize product schema markup and ensure comprehensive product specifications are visible to crawlers.",
+          urgency: "routine",
         },
       ];
     } else if (f.type === "bing_crawl_issues") {
@@ -450,11 +540,11 @@ async function interpretFindings({
     const websiteType = userContext.profile?.websiteType || "Website";
 
     const prompt = `
-You are the AI Website Watchdog analysis engine for Sharflow.
-Your role: explain and prioritize findings that code algorithms have already flagged and verified.
+You are the AI Business Intelligence engine for Sharflow, focused on e-commerce store owners.
+Your role: explain and prioritize findings that code algorithms have already flagged and verified from store analytics (GA4 primary, GSC/Bing secondary).
 DO NOT question or second-guess whether these findings are real. They have already cleared strict statistical noise floors and sustained-change checks.
 
-Website: ${websiteUrl} (${websiteType})
+Website/Store: ${websiteUrl} (${websiteType})
 User Priorities: ${JSON.stringify(userContext.profile?.monitoringPriorities || [])}
 
 Verified Code Findings to Interpret (${findings.length} total):
@@ -463,13 +553,19 @@ ${externalResearch && externalResearch.length > 0 ? `
 External Research & Context (Official Search Central announcements, industry discussions, SERP volatility):
 ${JSON.stringify(externalResearch, null, 2)}
 ` : ""}
-If external research is provided, incorporate relevant external context (e.g. search updates, competitor movements, community reports) into plausibleCauses and impactAssessment where directly applicable. Never fabricate numbers or sources.
-For "near_zero_search_visibility" findings, treat them as a baseline search indexation/visibility bottleneck (not a sudden traffic drop) and recommend concrete indexing, sitemap, and keyword targeting steps. For "bing_crawl_issues" findings, reference the specific affected URLs and HTTP/crawl issue types from the finding evidence. For "page_not_indexed" and "mobile_usability_issue" findings, reference the exact inspected URL, Google coverageState/fetch state, or mobile usability issue types from the finding evidence.
+CRITICAL E-COMMERCE INTELLIGENCE RULES:
+1. Clearly separate Evidence → What Changed → Possible Explanations → Recommended Action.
+2. "Possible explanations" MUST ALWAYS be presented as plausible hypotheses, NEVER as confirmed causes.
+   Example: Write "Payment gateway friction, unexpected shipping fee disclosures, or customer hesitation may contribute to checkout drop-offs."
+   DO NOT write: "The payment gateway caused the drop-off" unless direct error logs prove it.
+3. If verified AI referral traffic is present, use exact factual attribution wording: "Traffic attributed to [source/platform]". Never claim "AI recommended your store" unless data explicitly proves that statement.
+4. For e-commerce findings (revenue drops, checkout drop-offs, cart abandonment), focus recommendations on concrete store audits: testing checkout on mobile/desktop, checking payment decline logs, verifying shipping rate displays, and auditing product page layout.
+5. If external research is provided, incorporate relevant external context where directly applicable. Never fabricate numbers or sources.
 
 Produce a JSON object matching this exact structure:
 {
-  "headline": "A concise, professional 6-12 word executive headline summarizing the findings.",
-  "summary": "2-3 clear, executive sentences explaining what changed, why it matters, and overall site posture.",
+  "headline": "A concise, professional 6-12 word executive headline summarizing the findings for the store owner.",
+  "summary": "2-3 clear, executive sentences explaining what changed in store performance, why it matters, and overall posture.",
   "overallHealth": "critical | needs_attention | steady",
   "priorityRankedFindings": [
     {

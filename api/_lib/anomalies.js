@@ -28,9 +28,14 @@ const NOISE_FLOORS = {
   gscImpressions7d: 150,
   ga4Sessions7d: 50,
   ga4Conversions7d: 10,
+  ga4Revenue7d: 100, // At least $100 baseline before revenue alerts fire
+  ga4Purchases7d: 5,  // At least 5 purchases baseline
+  ga4Checkouts7d: 8,  // At least 8 checkouts baseline
+  ga4CartAdds7d: 15,  // At least 15 cart adds baseline
   queryImpressions7d: 80,
   pageImpressions7d: 100,
   channelSessions7d: 40,
+  landingPageSessions7d: 25,
 };
 
 /**
@@ -428,6 +433,213 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
               detectedAt,
             });
           }
+        }
+      }
+
+      // 2C. E-Commerce Revenue Drop
+      const priorRevenue = w7d.priorMetrics.revenue;
+      const currRevenue = w7d.currentMetrics.revenue;
+      const revDiff = w7d.changes.revenue;
+
+      if (
+        priorRevenue !== null &&
+        currRevenue !== null &&
+        priorRevenue >= NOISE_FLOORS.ga4Revenue7d &&
+        revDiff.percent !== null &&
+        revDiff.percent <= -25.0
+      ) {
+        const isCritical = revDiff.percent <= -40.0 || (priorRevenue - currRevenue) >= 500;
+        findings.push({
+          id: makeFindingId("ecommerce_revenue_drop", "site", "ga4_revenue"),
+          userId,
+          type: "ecommerce_revenue_drop",
+          severity: isCritical ? "critical" : "warning",
+          confidence: Number((0.85 + (isCritical ? 0.08 : 0.04) + Math.min(0.06, priorRevenue / 2000)).toFixed(2)),
+          scope: "site",
+          evidence: {
+            metric: "revenue",
+            provider: "google_analytics",
+            currentRevenue: currRevenue,
+            priorRevenue,
+            absoluteChange: revDiff.absolute,
+            changePercent: revDiff.percent,
+            window: "last7_vs_prior7",
+            context: `Store revenue dropped ${Math.abs(revDiff.percent)}% over the last 7 days ($${currRevenue.toFixed(2)} vs $${priorRevenue.toFixed(2)} prior).`,
+          },
+          detectedAt,
+        });
+      }
+
+      // 2D. Checkout-to-Purchase Funnel Drop
+      const priorCheckouts = w7d.priorMetrics.checkoutCount;
+      const currCheckouts = w7d.currentMetrics.checkoutCount;
+      const priorPurchases = w7d.priorMetrics.purchaseCount;
+      const currPurchases = w7d.currentMetrics.purchaseCount;
+      const priorC2PRate = w7d.priorMetrics.checkoutToPurchaseRate;
+      const currC2PRate = w7d.currentMetrics.checkoutToPurchaseRate;
+
+      if (
+        priorCheckouts !== null &&
+        priorCheckouts >= NOISE_FLOORS.ga4Checkouts7d &&
+        priorC2PRate !== null &&
+        currC2PRate !== null &&
+        priorC2PRate >= 15.0
+      ) {
+        const rateDropPoints = priorC2PRate - currC2PRate;
+        if (rateDropPoints >= 8.0 || (currC2PRate / priorC2PRate) <= 0.70) {
+          const isCritical = rateDropPoints >= 15.0;
+          findings.push({
+            id: makeFindingId("checkout_to_purchase_drop", "site", "checkout_funnel"),
+            userId,
+            type: "checkout_to_purchase_drop",
+            severity: isCritical ? "critical" : "warning",
+            confidence: 0.88,
+            scope: "site",
+            evidence: {
+              metric: "checkoutToPurchaseRate",
+              provider: "google_analytics",
+              currentRate: currC2PRate,
+              priorRate: priorC2PRate,
+              rateDropPoints: Number(rateDropPoints.toFixed(2)),
+              currentCheckouts: currCheckouts || 0,
+              currentPurchases: currPurchases || 0,
+              window: "last7_vs_prior7",
+              context: `Checkout-to-purchase conversion rate fell from ${priorC2PRate}% to ${currC2PRate}% (${currPurchases} purchases from ${currCheckouts} checkouts; drop of ${rateDropPoints.toFixed(1)} percentage points).`,
+            },
+            detectedAt,
+          });
+        }
+      }
+
+      // 2E. Add-to-Cart Drop
+      const priorCartAdds = w7d.priorMetrics.addToCartCount;
+      const currCartAdds = w7d.currentMetrics.addToCartCount;
+      const cartDiff = w7d.changes.addToCartCount;
+
+      if (
+        priorCartAdds !== null &&
+        currCartAdds !== null &&
+        priorCartAdds >= NOISE_FLOORS.ga4CartAdds7d &&
+        cartDiff.percent !== null &&
+        cartDiff.percent <= -30.0
+      ) {
+        findings.push({
+          id: makeFindingId("add_to_cart_drop", "site", "add_to_cart"),
+          userId,
+          type: "add_to_cart_drop",
+          severity: "warning",
+          confidence: 0.82,
+          scope: "site",
+          evidence: {
+            metric: "addToCartCount",
+            provider: "google_analytics",
+            currentCartAdds: currCartAdds,
+            priorCartAdds,
+            changePercent: cartDiff.percent,
+            window: "last7_vs_prior7",
+            context: `Shopper add-to-cart actions dropped ${Math.abs(cartDiff.percent)}% over the last 7 days (${currCartAdds} vs ${priorCartAdds} prior).`,
+          },
+          detectedAt,
+        });
+      }
+
+      // 2F. Landing Page Engagement Collapse
+      const currLandingPages = w7d.currentDimensions?.landingPages || [];
+      const priorLandingPages = w7d.priorDimensions?.landingPages || [];
+      const priorLpMap = new Map(priorLandingPages.map((lp) => [lp.page, lp]));
+
+      for (const currLp of currLandingPages) {
+        const priorLp = priorLpMap.get(currLp.page);
+        if (!priorLp) continue;
+
+        const pSess = priorLp.sessions || 0;
+        const cSess = currLp.sessions || 0;
+        const isPriority = importantPagesList.some((ip) => ip && cleanPath(currLp.page).includes(ip));
+
+        if (pSess >= NOISE_FLOORS.landingPageSessions7d) {
+          const sessPctChange = ((cSess - pSess) / pSess) * 100;
+          if (sessPctChange <= -40.0) {
+            findings.push({
+              id: makeFindingId("landing_page_engagement_drop", "page", currLp.page),
+              userId,
+              type: "landing_page_engagement_drop",
+              severity: isPriority ? "critical" : "warning",
+              confidence: 0.84,
+              scope: "page",
+              evidence: {
+                subject: currLp.page,
+                metric: "sessions",
+                provider: "google_analytics",
+                currentSessions: cSess,
+                priorSessions: pSess,
+                changePercent: Number(sessPctChange.toFixed(1)),
+                isPriorityPage: isPriority,
+                window: "last7_vs_prior7",
+                context: `Shopper visits to landing page "${currLp.page}" fell ${Math.abs(Number(sessPctChange.toFixed(1)))}% (${cSess} vs ${pSess} prior).${isPriority ? " This is one of your designated priority pages." : ""}`,
+              },
+              detectedAt,
+            });
+          }
+        }
+      }
+
+      // 2G. Verified AI-Referral Traffic Shift (strictly when verified in GA4 data)
+      const currAi = w7d.currentDimensions?.aiReferrals || [];
+      const priorAi = w7d.priorDimensions?.aiReferrals || [];
+      const priorAiMap = new Map(priorAi.map((a) => [a.platform, a]));
+
+      for (const item of currAi) {
+        const pItem = priorAiMap.get(item.platform);
+        const pSess = pItem ? pItem.sessions : 0;
+        const cSess = item.sessions || 0;
+
+        if (pSess === 0 && cSess >= 10) {
+          // Surge from verified AI platform
+          findings.push({
+            id: makeFindingId("verified_ai_referral_shift", "channel", item.platform),
+            userId,
+            type: "verified_ai_referral_shift",
+            severity: "opportunity",
+            confidence: 0.80,
+            scope: "channel",
+            evidence: {
+              subject: item.platform,
+              metric: "sessions",
+              provider: "google_analytics",
+              currentSessions: cSess,
+              priorSessions: pSess,
+              window: "last7_vs_prior7",
+              context: `Traffic attributed to ${item.platform} emerged with ${cSess} verified sessions over the last 7 days (up from ${pSess} prior).`,
+            },
+            detectedAt,
+          });
+        }
+      }
+
+      for (const pItem of priorAi) {
+        const cItem = currAi.find((a) => a.platform === pItem.platform);
+        const cSess = cItem ? cItem.sessions : 0;
+        const pSess = pItem.sessions || 0;
+
+        if (pSess >= 15 && cSess <= Math.floor(pSess * 0.4)) {
+          findings.push({
+            id: makeFindingId("verified_ai_referral_shift", "channel", pItem.platform),
+            userId,
+            type: "verified_ai_referral_shift",
+            severity: "warning",
+            confidence: 0.78,
+            scope: "channel",
+            evidence: {
+              subject: pItem.platform,
+              metric: "sessions",
+              provider: "google_analytics",
+              currentSessions: cSess,
+              priorSessions: pSess,
+              window: "last7_vs_prior7",
+              context: `Traffic attributed to ${pItem.platform} dropped ${Math.abs(Number((((cSess - pSess) / pSess) * 100).toFixed(1)))}% (${cSess} sessions vs ${pSess} prior).`,
+            },
+            detectedAt,
+          });
         }
       }
     }

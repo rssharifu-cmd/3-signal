@@ -1212,11 +1212,133 @@ function renderWatchdogReportHtml(report) {
       </div>
   `;
 
+  // E-Commerce Store Performance (GA4 Primary)
+  const sp = report.storePerformance || null;
+  if (sp) {
+    const isEcom = sp.configured === true;
+    const visitorsVal = `${(sp.sessions || 0).toLocaleString()} sessions`;
+    const visitorsSub = sp.users ? `${(sp.users || 0).toLocaleString()} visitors` : "";
+    const engageVal = sp.engagementRate !== null && sp.engagementRate !== undefined
+      ? `${(sp.engagementRate * 100).toFixed(1)}%`
+      : (sp.averageEngagementTime ? `${sp.averageEngagementTime}s avg` : "—");
+    const cartVal = isEcom && sp.addToCartCount !== null ? (sp.addToCartCount || 0).toLocaleString() : "Not configured";
+    const checkoutVal = isEcom && sp.checkoutCount !== null ? (sp.checkoutCount || 0).toLocaleString() : "Not configured";
+    const purchasesVal = isEcom && sp.purchaseCount !== null ? (sp.purchaseCount || 0).toLocaleString() : "Not configured";
+    const revenueVal = isEcom && sp.revenue !== null ? `$${sp.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Not configured";
+
+    let dropOffContent = "";
+    if (isEcom && sp.checkoutCount > 0 && sp.purchaseCount !== null) {
+      const c2pRate = sp.checkoutToPurchaseRate !== null ? sp.checkoutToPurchaseRate : ((sp.purchaseCount / sp.checkoutCount) * 100);
+      const abandonRate = Math.max(0, 100 - c2pRate).toFixed(1);
+      if (sp.addToCartCount > 0 && sp.checkoutCount < sp.addToCartCount) {
+        const cartToCheckout = ((sp.checkoutCount / sp.addToCartCount) * 100).toFixed(1);
+        dropOffContent = `
+          <div style="font-size:13px;color:var(--text);line-height:1.5;">
+            <strong>Checkout Drop-Off:</strong> ${abandonRate}% of shoppers who began checkout did not complete their order (${sp.checkoutCount} checkouts vs ${sp.purchaseCount} orders).<br/>
+            <span style="color:var(--muted);">Cart-to-checkout progression: ${cartToCheckout}% of cart additions proceeded to checkout.</span>
+          </div>
+        `;
+      } else {
+        dropOffContent = `
+          <div style="font-size:13px;color:var(--text);line-height:1.5;">
+            <strong>Checkout Conversion:</strong> ${c2pRate.toFixed(1)}% of shoppers who started checkout completed their purchase (${abandonRate}% checkout drop-off).
+          </div>
+        `;
+      }
+    } else if (isEcom) {
+      dropOffContent = `
+        <div style="font-size:13px;color:var(--muted);line-height:1.5;">
+          Shopper funnel progression steady with ${(sp.sessions || 0).toLocaleString()} visits recorded yesterday.
+        </div>
+      `;
+    } else {
+      dropOffContent = `
+        <div style="font-size:13px;color:var(--muted);line-height:1.5;">
+          E-commerce funnel events (<code style="font-size:12px;">add_to_cart</code>, <code style="font-size:12px;">begin_checkout</code>, <code style="font-size:12px;">purchase</code>) are not yet configured in your GA4 property. Once enabled, drop-off analysis will populate automatically.
+        </div>
+      `;
+    }
+
+    const topChannels = Array.isArray(sp.topChannels) ? sp.topChannels : [];
+    const aiReferrals = Array.isArray(sp.aiReferrals) ? sp.aiReferrals : [];
+    const totalSess = sp.sessions || 1;
+
+    let sourcesContent = "";
+    if (topChannels.length > 0) {
+      const channelPills = topChannels.map((c) => {
+        const pct = Math.round((c.sessions / totalSess) * 100);
+        return `<span style="display:inline-block;padding:3px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);margin-right:6px;margin-bottom:4px;"><strong>${escapeHtml(c.channel)}:</strong> ${c.sessions} (${pct}%)</span>`;
+      }).join("");
+
+      let aiPills = "";
+      if (aiReferrals.length > 0) {
+        const aiItems = aiReferrals.map((a) => `${a.sessions} session${a.sessions > 1 ? "s" : ""} attributed to ${escapeHtml(a.platform || a.source)}`).join(", ");
+        aiPills = `<div style="margin-top:6px;font-size:12px;color:var(--accent);">🤖 <strong>Verified AI Referrals:</strong> ${aiItems}</div>`;
+      }
+
+      sourcesContent = `
+        <div style="margin-bottom:4px;">${channelPills}</div>
+        ${aiPills}
+      `;
+    } else {
+      sourcesContent = `<div style="font-size:12px;color:var(--muted);">No traffic sources recorded yesterday.</div>`;
+    }
+
+    html += `
+      <div class="watchdog-store-section" style="margin-bottom:18px;">
+        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Yesterday's Store Performance</h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:10px;margin-bottom:12px;">
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Visitors</div>
+            <div style="font-size:16px;font-weight:700;color:var(--text);">${escapeHtml(visitorsVal)}</div>
+            ${visitorsSub ? `<div style="font-size:11px;color:var(--dim);margin-top:2px;">${escapeHtml(visitorsSub)}</div>` : ""}
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Engagement</div>
+            <div style="font-size:16px;font-weight:700;color:var(--text);">${escapeHtml(engageVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">Session quality</div>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Add to Cart</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.addToCartCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(cartVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.addToCartRate !== null ? `${sp.addToCartRate}% of visits` : "Cart events"}</div>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Checkouts</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.checkoutCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(checkoutVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.checkoutRate !== null ? `${sp.checkoutRate}% of visits` : "Checkouts started"}</div>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Purchases</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.purchaseCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(purchasesVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.purchaseConversionRate !== null ? `${sp.purchaseConversionRate}% conv. rate` : "Completed orders"}</div>
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Revenue</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.revenue !== null ? "#059669" : "var(--dim)"};">${escapeHtml(revenueVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">Total sales</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));gap:10px;">
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Where Shoppers Dropped Off</div>
+            ${dropOffContent}
+          </div>
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Traffic Sources &amp; Attribution</div>
+            ${sourcesContent}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // 1. Priority-Ranked Findings
   if (findings.length > 0) {
     html += `
       <div class="watchdog-findings-section" style="margin-bottom:18px;">
-        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Priority-Ranked Findings (${findings.length})</h4>
+        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Needs Attention · Actionable Signals (${findings.length})</h4>
         <div style="display:flex;flex-direction:column;gap:12px;">
     `;
 
@@ -1250,10 +1372,10 @@ function renderWatchdogReportHtml(report) {
             <strong style="font-size:14px;color:var(--text);">${escapeHtml(title)}</strong>
           </div>
           ${evContext ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;background:var(--surface);padding:8px 12px;border-radius:6px;border:1px solid var(--border);">${escapeHtml(evContext)}</div>` : ""}
-          ${primaryCause ? `<p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:6px;"><strong>Probable root cause:</strong> ${escapeHtml(primaryCause)}</p>` : ""}
+          ${primaryCause ? `<p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:6px;"><strong>Possible explanation (hypothesis):</strong> ${escapeHtml(primaryCause)}</p>` : ""}
           ${plausibleCauses.length > 1 ? `
             <details style="font-size:12px;color:var(--dim);margin-bottom:8px;cursor:pointer;">
-              <summary style="font-weight:600;color:var(--muted);margin-bottom:4px;">Alternative plausible factors (${plausibleCauses.length})</summary>
+              <summary style="font-weight:600;color:var(--muted);margin-bottom:4px;">Alternative hypotheses (${plausibleCauses.length})</summary>
               <ul style="padding-left:18px;margin:4px 0;">
                 ${plausibleCauses.map((c) => `<li style="margin-bottom:2px;">${escapeHtml(c)}</li>`).join("")}
               </ul>
