@@ -19,6 +19,7 @@
  */
 
 const { GoogleGenAI } = require("@google/genai");
+const { matchesUserPreferences } = require("./preferences");
 
 const FIXED_ALL_CLEAR = {
   status: "stable",
@@ -152,11 +153,29 @@ function buildNormalStateInterpretation({ usableProviders = [], unusableProvider
  * @returns {object}
  */
 function buildDeterministicInterpretation(findings, userContext, externalResearch = []) {
-  // Sort findings by severity descending (critical > warning > opportunity > info) before mapping
+  // Sort findings by severity descending (critical > warning > opportunity > info),
+  // prioritizing categories explicitly chosen by the user while keeping criticals at top.
+  const userPrefs = userContext?.userPreferences || userContext?.profile?.monitoringPriorities || [];
   const severityOrder = { critical: 0, warning: 1, opportunity: 2, info: 3 };
+
   const sortedFindings = [...findings].sort((a, b) => {
+    // 1. Critical findings always come first for safety
+    if (a.severity === "critical" && b.severity !== "critical") return -1;
+    if (b.severity === "critical" && a.severity !== "critical") return 1;
+
+    // 2. Findings matching user preferences rank above non-matching findings
+    if (userPrefs.length > 0) {
+      const aMatch = matchesUserPreferences(a, userPrefs);
+      const bMatch = matchesUserPreferences(b, userPrefs);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+    }
+
+    // 3. Severity order
     const diff = (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99);
     if (diff !== 0) return diff;
+
+    // 4. Confidence
     return (b.confidence || 0) - (a.confidence || 0);
   });
 
@@ -545,7 +564,7 @@ Your role: explain and prioritize findings that code algorithms have already fla
 DO NOT question or second-guess whether these findings are real. They have already cleared strict statistical noise floors and sustained-change checks.
 
 Website/Store: ${websiteUrl} (${websiteType})
-User Priorities: ${JSON.stringify(userContext.profile?.monitoringPriorities || [])}
+User Selected Monitoring Preferences: ${JSON.stringify(userContext.userPreferences || userContext.profile?.monitoringPriorities || [])}
 
 Verified Code Findings to Interpret (${findings.length} total):
 ${JSON.stringify(findings, null, 2)}
@@ -561,6 +580,7 @@ CRITICAL E-COMMERCE INTELLIGENCE RULES:
 3. If verified AI referral traffic is present, use exact factual attribution wording: "Traffic attributed to [source/platform]". Never claim "AI recommended your store" unless data explicitly proves that statement.
 4. For e-commerce findings (revenue drops, checkout drop-offs, cart abandonment), focus recommendations on concrete store audits: testing checkout on mobile/desktop, checking payment decline logs, verifying shipping rate displays, and auditing product page layout.
 5. If external research is provided, incorporate relevant external context where directly applicable. Never fabricate numbers or sources.
+6. Respect the user's selected monitoring categories. Emphasize signals and recommendations directly related to those areas in your summary and ranking. Non-selected categories should only be highlighted if they represent critical outages or severe tracking disruption.
 
 Produce a JSON object matching this exact structure:
 {

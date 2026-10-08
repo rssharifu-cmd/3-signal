@@ -33,6 +33,7 @@ const {
   buildNoSourcesInterpretation,
   buildInsufficientDataInterpretation,
 } = require("./intelligence");
+const { normalizeMonitoringPreferences } = require("./preferences");
 const { searchWeb, fetchRssFeed, searchReddit, GOOGLE_SEARCH_CENTRAL_FEED } = require("./research");
 
 /**
@@ -611,6 +612,11 @@ async function generateDailyIntelligence(userId, options = {}) {
 
   // ── 6. AI INTERPRETATION LAYER (STEP 5) ───────────────────────────────────
   // The ONLY place an LLM is called. If findings is empty, AI call is skipped.
+  const userPreferences = normalizeMonitoringPreferences(
+    user.profile?.monitoringPriorities,
+    user.profile?.websiteType
+  );
+
   const intelligence = await interpretFindings({
     findings,
     userContext: {
@@ -619,6 +625,7 @@ async function generateDailyIntelligence(userId, options = {}) {
       name: user.name || userEmail.split("@")[0],
       profile: user.profile || {},
       websiteUrl,
+      userPreferences,
     },
     comparisonWindows: usableWindowsByProvider,
     externalResearch,
@@ -717,6 +724,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     websiteUrl,
     monitoringStatus: "active",
     status: intelligence.status || (findings.length === 0 ? "stable" : "warning"),
+    userPreferences,
     storePerformance,
     activeSources: activeSourcesWithProperty.map((s) => {
       const isUsable = usableProviders.some((u) => u.provider === s.provider);

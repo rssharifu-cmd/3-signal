@@ -463,8 +463,8 @@
         <!-- Step 4: Monitoring Priorities -->
         <div class="onboard-step" id="onboard-step-4">
           <h2>What should Watchdog pay the most attention to?</h2>
-          <p class="step-lead">Select all signals that matter most for this website. You can select multiple.</p>
-          <div class="select-grid" id="priority-options">
+          <p class="step-lead">Choose the metrics and signals you want Sharflow to monitor and emphasize. You can select multiple categories.</p>
+          <div id="priority-options" style="display:flex;flex-direction:column;gap:16px;margin-top:14px;">
             <!-- Rendered by JS -->
           </div>
           <div class="onboard-actions">
@@ -790,9 +790,12 @@
 
       <!-- Profile panel -->
       <div class="dash-panel hidden" id="panel-profile">
-        <div class="dash-header">
-          <h1>Your website profile</h1>
-          <p>Your monitoring profile configuration. Reset anytime to start fresh.</p>
+        <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+          <div>
+            <h1>Your website profile</h1>
+            <p>Your monitoring profile configuration. Update your preferences anytime.</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-edit-preferences" onclick="toggleProfilePreferencesEditor()">Customize Monitoring ⚙️</button>
         </div>
         <div class="dash-card">
           <div class="profile-row"><span class="label">Website</span><span id="dp-website-2" style="font-weight:600;color:var(--text);">—</span></div>
@@ -801,6 +804,19 @@
           <div class="profile-row"><span class="label">Watching</span><div class="profile-tags" id="dp-tags-2"></div></div>
           <div class="profile-row"><span class="label">Key Pages</span><span id="dp-pages-2">—</span></div>
           <div class="profile-row"><span class="label">Summary</span><span id="dp-summary-2" style="font-size:13px;line-height:1.5;color:var(--muted);white-space:pre-wrap;">—</span></div>
+        </div>
+
+        <!-- Inline Preferences Editor Card (hidden by default) -->
+        <div class="dash-card hidden" id="profile-preferences-card" style="margin-top:16px;">
+          <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <h3>User-Controlled Monitoring Categories</h3>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-secondary btn-sm" onclick="toggleProfilePreferencesEditor(false)">Cancel</button>
+              <button class="btn btn-primary btn-sm" id="btn-save-preferences" onclick="saveProfilePreferences()">Save Preferences ✓</button>
+            </div>
+          </div>
+          <p style="font-size:13px;color:var(--muted);margin:8px 0 14px;">Choose the exact metrics and signals you want Sharflow to emphasize in your daily briefings and intelligence reports.</p>
+          <div id="profile-preferences-container" style="display:flex;flex-direction:column;gap:16px;"></div>
         </div>
       </div>
     </main>

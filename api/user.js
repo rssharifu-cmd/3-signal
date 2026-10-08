@@ -130,9 +130,11 @@ async function handler(req, res) {
           ? body.profile.websitePurpose.trim()
           : (existingProfile.websitePurpose || "");
 
-        const monitoringPriorities = Array.isArray(body.profile.monitoringPriorities) && body.profile.monitoringPriorities.length > 0
+        const { normalizeMonitoringPreferences } = require("./_lib/preferences");
+        const rawPriorities = Array.isArray(body.profile.monitoringPriorities)
           ? body.profile.monitoringPriorities
           : (Array.isArray(existingProfile.monitoringPriorities) ? existingProfile.monitoringPriorities : []);
+        const monitoringPriorities = normalizeMonitoringPreferences(rawPriorities, websiteType);
 
         const importantPages = Array.isArray(body.profile.importantPages)
           ? body.profile.importantPages

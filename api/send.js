@@ -12,6 +12,7 @@
  */
 
 const RESEND_URL = "https://api.resend.com/emails";
+const { normalizeMonitoringPreferences, matchesUserPreferences } = require("./_lib/preferences");
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -250,19 +251,26 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
     sourcesHtml = `<div style="font-size:13px;color:#64748B;">No traffic sources recorded yesterday.</div>`;
   }
 
-  // Filter findings: Store & Business Relevant First (omit minor SEO noise in daily email)
+  // Filter findings: Store & Business Relevant First (respecting user monitoring preferences)
+  const userPreferences = report.userPreferences ||
+    normalizeMonitoringPreferences(report.userProfile?.monitoringPriorities || report.intelligence?.userPriorities, report.websiteType);
+
   const rawFindings = Array.isArray(report.intelligence?.priorityRankedFindings) && report.intelligence.priorityRankedFindings.length > 0
     ? report.intelligence.priorityRankedFindings
     : (Array.isArray(report.findings) ? report.findings : []);
 
   const businessRelevantFindings = rawFindings.filter((f) => {
-    // Always include critical findings
+    // 1. Always include critical findings regardless of category (safety guarantee)
     if (f.severity === "critical") return true;
-    // Always include e-commerce and traffic findings
+
+    // 2. Check if the finding matches the user's selected preferences
+    if (Array.isArray(userPreferences) && userPreferences.length > 0) {
+      return matchesUserPreferences(f, userPreferences);
+    }
+
+    // 3. Fallback: default store & traffic findings
     if (["ecommerce_revenue_drop", "checkout_to_purchase_drop", "add_to_cart_drop", "conversion_drop", "traffic_source_shift", "landing_page_engagement_drop", "organic_traffic_drop"].includes(f.type)) return true;
-    // Include AI referral surges
     if (f.type === "verified_ai_referral_shift") return true;
-    // Omit secondary search queries unless high priority
     return f.severity === "warning" && f.scope === "site";
   });
 

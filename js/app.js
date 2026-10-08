@@ -357,21 +357,157 @@ const WEBSITE_PURPOSES = [
   "Other",
 ];
 
-const MONITORING_PRIORITIES = [
-  "Search visibility",
-  "Traffic changes",
-  "Important pages",
-  "Technical / indexing problems",
-  "Leads / conversions",
-  "Content opportunities",
-  "All important changes",
+const MONITORING_CATEGORIES = [
+  {
+    id: "ga4",
+    name: "GA4 / Store Performance",
+    provider: "google_analytics",
+    description: "Shopper conversion, traffic, funnel progression & store revenue",
+    options: [
+      "Sales & Revenue",
+      "Orders / Purchases",
+      "Visitors & Traffic",
+      "Traffic Sources / Campaigns",
+      "Shopping Funnel",
+      "Landing Pages",
+      "Engagement",
+      "Device / Country",
+      "Verified AI / Referral Traffic",
+    ],
+  },
+  {
+    id: "gsc",
+    name: "Google Search Console",
+    provider: "google_search_console",
+    description: "Organic search visibility, rankings, impressions & indexing",
+    options: [
+      "Search clicks & impressions",
+      "Search queries",
+      "Top pages",
+      "Search position",
+      "Indexing problems",
+      "Search traffic changes",
+    ],
+  },
+  {
+    id: "bing",
+    name: "Bing Webmaster",
+    provider: "bing_webmaster",
+    description: "Bing & Microsoft Copilot search queries, crawling & indexing",
+    options: [
+      "Clicks & impressions",
+      "Search queries",
+      "Top pages",
+      "Crawl problems",
+      "Indexing problems",
+    ],
+  },
+  {
+    id: "technical",
+    name: "Website / Technical",
+    provider: "technical",
+    description: "Availability, priority landing pages & technical alerts",
+    options: [
+      "Website availability",
+      "Important page problems",
+      "Technical/indexing alerts",
+    ],
+  },
 ];
+
+const ECOMMERCE_DEFAULT_PRIORITIES = [
+  "Sales & Revenue",
+  "Orders / Purchases",
+  "Visitors & Traffic",
+  "Traffic Sources / Campaigns",
+  "Shopping Funnel",
+];
+
+const GENERAL_DEFAULT_PRIORITIES = [
+  "Visitors & Traffic",
+  "Search clicks & impressions",
+  "Search traffic changes",
+  "Important page problems",
+  "Website availability",
+];
+
+const ALL_MONITORING_OPTIONS = MONITORING_CATEGORIES.flatMap((c) => c.options);
+
+const LEGACY_PRIORITY_MAP = {
+  "Search visibility": ["Search clicks & impressions", "Search position"],
+  "Traffic changes": ["Visitors & Traffic", "Search traffic changes"],
+  "Important pages": ["Top pages", "Important page problems", "Landing Pages"],
+  "Technical / indexing problems": ["Indexing problems", "Crawl problems", "Technical/indexing alerts"],
+  "Leads / conversions": ["Orders / Purchases", "Sales & Revenue", "Shopping Funnel"],
+  "Content opportunities": ["Search queries", "Top pages"],
+  "Pricing Page Conversions": ["Orders / Purchases", "Shopping Funnel"],
+  "Organic Search Rankings": ["Search position", "Search queries"],
+};
+
+function normalizeMonitoringPreferences(priorities, websiteType = "") {
+  if (!Array.isArray(priorities) || priorities.length === 0) {
+    const isEcom = String(websiteType || "").toLowerCase().includes("e-commerce") || String(websiteType || "").toLowerCase().includes("store");
+    return isEcom ? [...ECOMMERCE_DEFAULT_PRIORITIES] : [...GENERAL_DEFAULT_PRIORITIES];
+  }
+  if (priorities.includes("All important changes")) {
+    const isEcom = String(websiteType || "").toLowerCase().includes("e-commerce") || String(websiteType || "").toLowerCase().includes("store");
+    if (isEcom) {
+      return Array.from(new Set([
+        ...ECOMMERCE_DEFAULT_PRIORITIES,
+        "Landing Pages",
+        "Engagement",
+        "Verified AI / Referral Traffic",
+        "Search clicks & impressions",
+        "Search traffic changes",
+        "Important page problems",
+        "Technical/indexing alerts",
+      ]));
+    }
+    return [...ALL_MONITORING_OPTIONS];
+  }
+
+  const set = new Set();
+  for (const item of priorities) {
+    if (typeof item !== "string") continue;
+    const trimmed = item.trim();
+    if (ALL_MONITORING_OPTIONS.includes(trimmed)) {
+      set.add(trimmed);
+      continue;
+    }
+    if (LEGACY_PRIORITY_MAP[trimmed]) {
+      LEGACY_PRIORITY_MAP[trimmed].forEach((opt) => set.add(opt));
+      continue;
+    }
+    const lower = trimmed.toLowerCase();
+    if (lower.includes("revenue") || lower.includes("sales")) set.add("Sales & Revenue");
+    if (lower.includes("order") || lower.includes("purchase") || lower.includes("conversion")) set.add("Orders / Purchases");
+    if (lower.includes("funnel") || lower.includes("cart") || lower.includes("checkout")) set.add("Shopping Funnel");
+    if (lower.includes("visitor") || lower.includes("traffic")) set.add("Visitors & Traffic");
+    if (lower.includes("source") || lower.includes("campaign")) set.add("Traffic Sources / Campaigns");
+    if (lower.includes("ai") || lower.includes("chatgpt") || lower.includes("referral")) set.add("Verified AI / Referral Traffic");
+    if (lower.includes("ranking") || lower.includes("position")) set.add("Search position");
+    if (lower.includes("query") || lower.includes("keyword")) set.add("Search queries");
+    if (lower.includes("index") || lower.includes("crawl")) set.add("Indexing problems");
+    if (lower.includes("page")) set.add("Top pages");
+  }
+
+  if (set.size === 0) {
+    const isEcom = String(websiteType || "").toLowerCase().includes("e-commerce") || String(websiteType || "").toLowerCase().includes("store");
+    return isEcom ? [...ECOMMERCE_DEFAULT_PRIORITIES] : [...GENERAL_DEFAULT_PRIORITIES];
+  }
+
+  return Array.from(set);
+}
+
+// Flat list alias for backward compatibility
+const MONITORING_PRIORITIES = ALL_MONITORING_OPTIONS;
 
 let onboardingData = {
   websiteUrl: "",
   websiteType: "",
   websitePurpose: "",
   monitoringPriorities: [],
+  userCustomizedPriorities: false,
   importantPages: [],
 };
 
@@ -386,11 +522,13 @@ function showOnboarding() {
 
   // Pre-seed from existing form or reset
   const saved = getSavedForm();
+  const normalizedPriorities = normalizeMonitoringPreferences(saved.monitoringPriorities, saved.websiteType);
   onboardingData = {
     websiteUrl: saved.websiteUrl || "",
     websiteType: saved.websiteType || "",
     websitePurpose: saved.websitePurpose || "",
-    monitoringPriorities: Array.isArray(saved.monitoringPriorities) ? [...saved.monitoringPriorities] : [],
+    monitoringPriorities: [...normalizedPriorities],
+    userCustomizedPriorities: Array.isArray(saved.monitoringPriorities) && saved.monitoringPriorities.length > 0,
     importantPages: Array.isArray(saved.importantPages) ? [...saved.importantPages] : [],
   };
 
@@ -524,6 +662,14 @@ function selectWebsiteType(type) {
     onboardingData.websiteType = type;
   }
 
+  // Preselect E-commerce categories if user selected E-commerce and hasn't manually customized yet
+  if (type === "E-commerce / Online Store") {
+    if (!onboardingData.userCustomizedPriorities || onboardingData.monitoringPriorities.length === 0) {
+      onboardingData.monitoringPriorities = [...ECOMMERCE_DEFAULT_PRIORITIES];
+      renderPriorityOptions();
+    }
+  }
+
   document.querySelectorAll("#type-options .select-card").forEach((c) => {
     c.classList.toggle("selected", c.getAttribute("data-value") === type);
   });
@@ -608,43 +754,86 @@ function renderPriorityOptions() {
   if (!container) return;
   container.innerHTML = "";
 
-  MONITORING_PRIORITIES.forEach((priority) => {
-    const card = document.createElement("div");
-    card.className = "select-card";
-    card.setAttribute("data-value", priority);
-    const isSelected = onboardingData.monitoringPriorities.includes(priority);
-    if (isSelected) card.classList.add("selected");
+  MONITORING_CATEGORIES.forEach((cat) => {
+    const sec = document.createElement("div");
+    sec.className = "priority-category-sec";
+    sec.style.background = "var(--surface-2)";
+    sec.style.border = "1px solid var(--border)";
+    sec.style.borderRadius = "var(--radius-sm)";
+    sec.style.padding = "14px 16px";
 
-    card.innerHTML = `
-      <span>${priority}</span>
-      <span class="card-check">✓</span>
+    const allCatSelected = cat.options.every((opt) => onboardingData.monitoringPriorities.includes(opt));
+
+    const head = document.createElement("div");
+    head.style.display = "flex";
+    head.style.justifyContent = "space-between";
+    head.style.alignItems = "center";
+    head.style.marginBottom = "10px";
+    head.style.flexWrap = "wrap";
+    head.style.gap = "8px";
+
+    head.innerHTML = `
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);letter-spacing:0.02em;">${escapeHtml(cat.name)}</div>
+        <div style="font-size:11.5px;color:var(--muted);">${escapeHtml(cat.description)}</div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;cursor:pointer;">
+        ${allCatSelected ? "Deselect Category" : "Select Category"}
+      </button>
     `;
-    card.onclick = () => toggleMonitoringPriority(priority);
-    container.appendChild(card);
+
+    const toggleBtn = head.querySelector("button");
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      onboardingData.userCustomizedPriorities = true;
+      if (allCatSelected) {
+        onboardingData.monitoringPriorities = onboardingData.monitoringPriorities.filter((p) => !cat.options.includes(p));
+      } else {
+        cat.options.forEach((opt) => {
+          if (!onboardingData.monitoringPriorities.includes(opt)) {
+            onboardingData.monitoringPriorities.push(opt);
+          }
+        });
+      }
+      renderPriorityOptions();
+      updatePriorityContinueButton();
+    };
+
+    const grid = document.createElement("div");
+    grid.className = "select-grid";
+    grid.style.marginTop = "0";
+
+    cat.options.forEach((priority) => {
+      const card = document.createElement("div");
+      card.className = "select-card";
+      card.setAttribute("data-value", priority);
+      const isSelected = onboardingData.monitoringPriorities.includes(priority);
+      if (isSelected) card.classList.add("selected");
+
+      card.innerHTML = `
+        <span style="font-size:13px;">${escapeHtml(priority)}</span>
+        <span class="card-check">✓</span>
+      `;
+      card.onclick = () => {
+        onboardingData.userCustomizedPriorities = true;
+        toggleMonitoringPriority(priority);
+      };
+      grid.appendChild(card);
+    });
+
+    sec.appendChild(head);
+    sec.appendChild(grid);
+    container.appendChild(sec);
   });
 }
 
 function toggleMonitoringPriority(priority) {
-  if (priority === "All important changes") {
-    if (onboardingData.monitoringPriorities.includes("All important changes")) {
-      onboardingData.monitoringPriorities = [];
-    } else {
-      onboardingData.monitoringPriorities = [...MONITORING_PRIORITIES];
-    }
+  onboardingData.userCustomizedPriorities = true;
+  const idx = onboardingData.monitoringPriorities.indexOf(priority);
+  if (idx >= 0) {
+    onboardingData.monitoringPriorities.splice(idx, 1);
   } else {
-    const idx = onboardingData.monitoringPriorities.indexOf(priority);
-    if (idx >= 0) {
-      onboardingData.monitoringPriorities.splice(idx, 1);
-      const allIdx = onboardingData.monitoringPriorities.indexOf("All important changes");
-      if (allIdx >= 0) onboardingData.monitoringPriorities.splice(allIdx, 1);
-    } else {
-      onboardingData.monitoringPriorities.push(priority);
-      const nonAll = MONITORING_PRIORITIES.filter((p) => p !== "All important changes");
-      const hasAllIndividual = nonAll.every((p) => onboardingData.monitoringPriorities.includes(p));
-      if (hasAllIndividual && !onboardingData.monitoringPriorities.includes("All important changes")) {
-        onboardingData.monitoringPriorities.push("All important changes");
-      }
-    }
+    onboardingData.monitoringPriorities.push(priority);
   }
 
   document.querySelectorAll("#priority-options .select-card").forEach((c) => {
@@ -694,7 +883,7 @@ function nextOnboardStep(targetStep) {
     }
   } else if (targetStep === 5) {
     if (onboardingData.monitoringPriorities.length === 0) {
-      onboardingData.monitoringPriorities = ["All important changes"];
+      onboardingData.monitoringPriorities = normalizeMonitoringPreferences([], onboardingData.websiteType);
       renderPriorityOptions();
     }
   } else if (targetStep === 6) {
@@ -1001,6 +1190,194 @@ function syncProfilePanels() {
   const tags = document.getElementById("dp-tags");
   const tags2 = document.getElementById("dp-tags-2");
   if (tags && tags2) tags2.innerHTML = tags.innerHTML;
+}
+
+const FINDING_CATEGORY_MAP = {
+  ecommerce_revenue_drop: ["Sales & Revenue"],
+  checkout_to_purchase_drop: ["Orders / Purchases", "Shopping Funnel"],
+  add_to_cart_drop: ["Shopping Funnel"],
+  conversion_drop: ["Orders / Purchases", "Shopping Funnel"],
+  traffic_source_shift: ["Traffic Sources / Campaigns"],
+  verified_ai_referral_shift: ["Verified AI / Referral Traffic", "Traffic Sources / Campaigns"],
+  landing_page_engagement_drop: ["Landing Pages", "Important page problems"],
+  organic_traffic_drop: ["Visitors & Traffic", "Search traffic changes", "Search clicks & impressions"],
+  ranking_position_drop: ["Search position", "Search queries"],
+  ctr_opportunity: ["Search clicks & impressions", "Search queries"],
+  new_page_traction: ["Top pages", "Visitors & Traffic"],
+  page_not_indexed: ["Indexing problems", "Important page problems", "Technical/indexing alerts"],
+  mobile_usability_issue: ["Technical/indexing alerts", "Important page problems"],
+  low_search_visibility_baseline: ["Search clicks & impressions", "Clicks & impressions"],
+  bing_organic_click_drop: ["Clicks & impressions", "Search traffic changes"],
+  bing_organic_traffic_drop: ["Clicks & impressions", "Search traffic changes"],
+  bing_crawl_issues: ["Crawl problems", "Technical/indexing alerts", "Indexing problems"],
+};
+
+function matchesUserPreferences(finding, userPreferences) {
+  if (!finding) return false;
+  if (finding.severity === "critical") return true;
+  if (!Array.isArray(userPreferences) || userPreferences.length === 0) return true;
+  const mapped = FINDING_CATEGORY_MAP[finding.type] || [];
+  return mapped.some((opt) => userPreferences.includes(opt));
+}
+
+let editingProfilePriorities = [];
+
+function toggleProfilePreferencesEditor(show) {
+  const card = document.getElementById("profile-preferences-card");
+  if (!card) return;
+  const isHidden = card.classList.contains("hidden");
+  const willShow = typeof show === "boolean" ? show : isHidden;
+
+  if (willShow) {
+    const form = getSavedForm();
+    editingProfilePriorities = normalizeMonitoringPreferences(form.monitoringPriorities, form.websiteType);
+    renderProfilePreferencesEditor();
+    card.classList.remove("hidden");
+    card.scrollIntoView({ behavior: "smooth", block: "start" });
+  } else {
+    card.classList.add("hidden");
+  }
+}
+
+function renderProfilePreferencesEditor() {
+  const container = document.getElementById("profile-preferences-container");
+  if (!container) return;
+  container.innerHTML = "";
+
+  MONITORING_CATEGORIES.forEach((cat) => {
+    const sec = document.createElement("div");
+    sec.className = "priority-category-sec";
+    sec.style.background = "var(--surface-2)";
+    sec.style.border = "1px solid var(--border)";
+    sec.style.borderRadius = "var(--radius-sm)";
+    sec.style.padding = "14px 16px";
+
+    const allCatSelected = cat.options.every((opt) => editingProfilePriorities.includes(opt));
+
+    const head = document.createElement("div");
+    head.style.display = "flex";
+    head.style.justifyContent = "space-between";
+    head.style.alignItems = "center";
+    head.style.marginBottom = "10px";
+    head.style.flexWrap = "wrap";
+    head.style.gap = "8px";
+
+    head.innerHTML = `
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);letter-spacing:0.02em;">${escapeHtml(cat.name)}</div>
+        <div style="font-size:11.5px;color:var(--muted);">${escapeHtml(cat.description)}</div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px;cursor:pointer;">
+        ${allCatSelected ? "Deselect Category" : "Select Category"}
+      </button>
+    `;
+
+    const toggleBtn = head.querySelector("button");
+    toggleBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (allCatSelected) {
+        editingProfilePriorities = editingProfilePriorities.filter((p) => !cat.options.includes(p));
+      } else {
+        cat.options.forEach((opt) => {
+          if (!editingProfilePriorities.includes(opt)) {
+            editingProfilePriorities.push(opt);
+          }
+        });
+      }
+      renderProfilePreferencesEditor();
+    };
+
+    const grid = document.createElement("div");
+    grid.className = "select-grid";
+    grid.style.marginTop = "0";
+
+    cat.options.forEach((priority) => {
+      const card = document.createElement("div");
+      card.className = "select-card";
+      card.setAttribute("data-value", priority);
+      const isSelected = editingProfilePriorities.includes(priority);
+      if (isSelected) card.classList.add("selected");
+
+      card.innerHTML = `
+        <span style="font-size:13px;">${escapeHtml(priority)}</span>
+        <span class="card-check">✓</span>
+      `;
+      card.onclick = () => {
+        const idx = editingProfilePriorities.indexOf(priority);
+        if (idx >= 0) {
+          editingProfilePriorities.splice(idx, 1);
+        } else {
+          editingProfilePriorities.push(priority);
+        }
+        renderProfilePreferencesEditor();
+      };
+      grid.appendChild(card);
+    });
+
+    sec.appendChild(head);
+    sec.appendChild(grid);
+    container.appendChild(sec);
+  });
+}
+
+async function saveProfilePreferences() {
+  if (editingProfilePriorities.length === 0) {
+    toast("Please select at least one monitoring category");
+    return;
+  }
+
+  const btn = document.getElementById("btn-save-preferences");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving…";
+  }
+
+  try {
+    const form = getSavedForm();
+    form.monitoringPriorities = [...editingProfilePriorities];
+    localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
+
+    const token = localStorage.getItem(STORAGE.token) || "";
+    if (token) {
+      await fetch("/api/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: form.name,
+          profile: {
+            ...form,
+            monitoringPriorities: form.monitoringPriorities,
+          },
+        }),
+      });
+    }
+
+    // Refresh tags in UI
+    const tagsEl = document.getElementById("dp-tags");
+    if (tagsEl) {
+      tagsEl.innerHTML = "";
+      form.monitoringPriorities.slice(0, 10).forEach((t) => {
+        const tag = document.createElement("span");
+        tag.className = "profile-tag";
+        tag.textContent = t;
+        tagsEl.appendChild(tag);
+      });
+    }
+
+    syncProfilePanels();
+    toggleProfilePreferencesEditor(false);
+    toast("Monitoring preferences updated ✓");
+  } catch (err) {
+    console.error("Failed to save monitoring preferences:", err);
+    toast("Error saving preferences. Saved locally.");
+    syncProfilePanels();
+    toggleProfilePreferencesEditor(false);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Save Preferences ✓";
+    }
+  }
 }
 
 function syncDigestPanels() {
@@ -1334,15 +1711,28 @@ function renderWatchdogReportHtml(report) {
     `;
   }
 
-  // 1. Priority-Ranked Findings
-  if (findings.length > 0) {
+  // 1. Priority-Ranked Findings (prioritizing user-selected monitoring categories)
+  const userPreferences = report.userPreferences || getSavedForm().monitoringPriorities || [];
+  const displayFindings = [...findings].sort((a, b) => {
+    if (a.severity === "critical" && b.severity !== "critical") return -1;
+    if (b.severity === "critical" && a.severity !== "critical") return 1;
+    if (userPreferences.length > 0) {
+      const aMatch = matchesUserPreferences(a, userPreferences);
+      const bMatch = matchesUserPreferences(b, userPreferences);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+    }
+    return (a.priorityRank || 99) - (b.priorityRank || 99);
+  });
+
+  if (displayFindings.length > 0) {
     html += `
       <div class="watchdog-findings-section" style="margin-bottom:18px;">
-        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Needs Attention · Actionable Signals (${findings.length})</h4>
+        <h4 style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:var(--muted);margin-bottom:10px;">Needs Attention · Actionable Signals (${displayFindings.length})</h4>
         <div style="display:flex;flex-direction:column;gap:12px;">
     `;
 
-    findings.forEach((f, idx) => {
+    displayFindings.forEach((f, idx) => {
       const rank = f.priorityRank || (idx + 1);
       const badgeText = f.priorityBadge || `P${rank}`;
       const title = f.title || f.type || "Observation";
@@ -1351,6 +1741,7 @@ function renderWatchdogReportHtml(report) {
       const impact = f.impactAssessment || "";
       const evContext = f.originalEvidence?.context || f.evidence?.context || "";
       const itemActions = Array.isArray(f.recommendedActions) ? f.recommendedActions : [];
+      const isPreferred = matchesUserPreferences(f, userPreferences);
 
       let badgeBg = "var(--surface-2)";
       let badgeColor = "var(--muted)";
@@ -1370,6 +1761,7 @@ function renderWatchdogReportHtml(report) {
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
             <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:100px;background:${badgeBg};color:${badgeColor};">${escapeHtml(badgeText)}</span>
             <strong style="font-size:14px;color:var(--text);">${escapeHtml(title)}</strong>
+            ${isPreferred ? `<span style="font-size:10px;font-weight:600;padding:1px 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent);margin-left:auto;">★ Monitored</span>` : ""}
           </div>
           ${evContext ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;background:var(--surface);padding:8px 12px;border-radius:6px;border:1px solid var(--border);">${escapeHtml(evContext)}</div>` : ""}
           ${primaryCause ? `<p style="font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:6px;"><strong>Possible explanation (hypothesis):</strong> ${escapeHtml(primaryCause)}</p>` : ""}
@@ -2483,3 +2875,6 @@ window.saveSelectedProperty = saveSelectedProperty;
 window.disconnectDataSource = disconnectDataSource;
 window.loadDataSources = loadDataSources;
 window.exportReportCSV = exportReportCSV;
+window.toggleProfilePreferencesEditor = toggleProfilePreferencesEditor;
+window.renderProfilePreferencesEditor = renderProfilePreferencesEditor;
+window.saveProfilePreferences = saveProfilePreferences;
