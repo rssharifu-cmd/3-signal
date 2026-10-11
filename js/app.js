@@ -2480,7 +2480,134 @@ function renderDataSourceCard(provider, info, prefix) {
   const btnConnect = document.getElementById(`btn-connect-${prefix}`);
   const btnChange = document.getElementById(`btn-change-${prefix}`);
   const btnDisconnect = document.getElementById(`btn-disconnect-${prefix}`);
+  const banner = document.getElementById(`${prefix}-status-banner`);
 
+  // Provider-specific rendering for GA4 with three verified states
+  if (provider === "google_analytics" && info) {
+    const state = info.statusState || (info.connected ? "connected" : "not_connected");
+
+    if (state === "connected") {
+      if (badge) {
+        badge.textContent = info.statusBadge || "Connected ✓";
+        badge.style.background = "var(--green-soft)";
+        badge.style.color = "var(--green)";
+        badge.style.borderColor = "#A7F3D0";
+      }
+      if (banner) {
+        banner.style.display = "block";
+        banner.style.background = "#F0FDF4";
+        banner.style.border = "1px solid #BBF7D0";
+        banner.style.color = "#166534";
+        banner.textContent = info.statusMessage || "Connected & verified · Traffic monitoring active.";
+      }
+      if (connInfo) connInfo.style.display = "block";
+      if (btnConnect) btnConnect.style.display = "none";
+      if (btnChange) {
+        btnChange.textContent = "Change Property";
+        btnChange.style.display = "inline-block";
+      }
+      if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+    } else if (state === "partially_configured") {
+      if (badge) {
+        badge.textContent = info.statusBadge || "Partially configured";
+        badge.style.background = "#FEF3C7";
+        badge.style.color = "#92400E";
+        badge.style.borderColor = "#FDE68A";
+      }
+      if (banner) {
+        banner.style.display = "block";
+        banner.style.background = "#FFFBEB";
+        banner.style.border = "1px solid #FDE68A";
+        banner.style.color = "#92400E";
+        banner.innerHTML = `<strong>Partially configured:</strong> ${escapeHtml(info.statusMessage || "")}`;
+      }
+      if (connInfo) connInfo.style.display = "block";
+      if (btnConnect) btnConnect.style.display = "none";
+      if (btnChange) {
+        btnChange.textContent = "Change Property";
+        btnChange.style.display = "inline-block";
+      }
+      if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+    } else if (state === "action_required") {
+      if (badge) {
+        badge.textContent = info.statusBadge || "Action required ⚠️";
+        badge.style.background = "#FEF2F2";
+        badge.style.color = "#DC2626";
+        badge.style.borderColor = "#FECACA";
+      }
+      if (banner) {
+        banner.style.display = "block";
+        banner.style.background = "#FEF2F2";
+        banner.style.border = "1px solid #FECACA";
+        banner.style.color = "#991B1B";
+        banner.innerHTML = `<strong>Action required:</strong> ${escapeHtml(info.statusMessage || "A problem prevents monitoring.")}`;
+      }
+      if (connInfo) {
+        connInfo.style.display = info.selectedProperty && info.selectedProperty.name ? "block" : "none";
+      }
+      if (info.actionType === "reconnect") {
+        if (btnConnect) {
+          btnConnect.textContent = info.actionLabel || "Reconnect Google Analytics →";
+          btnConnect.style.display = "inline-block";
+        }
+        if (btnChange) btnChange.style.display = "none";
+        if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+      } else if (info.actionType === "select_property") {
+        if (btnConnect) btnConnect.style.display = "none";
+        if (btnChange) {
+          btnChange.textContent = info.actionLabel || "Select Property →";
+          btnChange.style.display = "inline-block";
+        }
+        if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+      } else {
+        if (btnConnect) btnConnect.style.display = "none";
+        if (btnChange) {
+          btnChange.textContent = info.actionLabel || "Change Property";
+          btnChange.style.display = "inline-block";
+        }
+        if (btnDisconnect) btnDisconnect.style.display = "inline-block";
+      }
+    } else {
+      // not_connected
+      if (badge) {
+        badge.textContent = "Not connected";
+        badge.style.background = "#FEF3C7";
+        badge.style.color = "#92400E";
+        badge.style.borderColor = "#FDE68A";
+      }
+      if (banner) banner.style.display = "none";
+      if (connInfo) connInfo.style.display = "none";
+      if (btnConnect) {
+        btnConnect.textContent = "Connect Analytics →";
+        btnConnect.style.display = "inline-block";
+      }
+      if (btnChange) btnChange.style.display = "none";
+      if (btnDisconnect) btnDisconnect.style.display = "none";
+    }
+
+    if (propLabel) {
+      if (info.selectedProperty && info.selectedProperty.name) {
+        propLabel.textContent = info.selectedProperty.name;
+        propLabel.style.color = "var(--text)";
+      } else {
+        propLabel.textContent = "No property selected yet — click below to select";
+        propLabel.style.color = "#D97706";
+      }
+    }
+    if (lastSync) {
+      lastSync.textContent = info.lastSuccessfulSync
+        ? new Date(info.lastSuccessfulSync).toLocaleString()
+        : "Ready to sync";
+    }
+    if (accRow && accEmail && info.accountEmail) {
+      accEmail.textContent = info.accountEmail;
+      accRow.style.display = "block";
+    }
+    return;
+  }
+
+  // Standard fallback for other data sources (GSC, Bing)
+  if (banner) banner.style.display = "none";
   if (info && info.connected) {
     if (badge) {
       badge.textContent = "Connected ✓";
@@ -2548,7 +2675,10 @@ function updateOverviewSourcesSummary(sources) {
   }
 
   if (dpStatus) {
-    if (connectedCount > 0) {
+    if (sources.google_analytics?.actionRequired) {
+      dpStatus.textContent = `⚠️ GA4 action required: ${sources.google_analytics.statusMessage || "Please check connection"}`;
+      dpStatus.style.color = "#DC2626";
+    } else if (connectedCount > 0) {
       const selectedNames = [
         sources.google_search_console?.selectedProperty?.name,
         sources.google_analytics?.selectedProperty?.name,

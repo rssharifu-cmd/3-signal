@@ -20,6 +20,7 @@ const {
   discoverAnalyticsProperties,
   discoverBingSites,
 } = require("./_lib/oauthTokens");
+const { verifyGa4Status } = require("./_lib/ga4Status");
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
@@ -41,6 +42,16 @@ module.exports = async function handler(req, res) {
     // ── 1. GET ALL DATA SOURCE STATUSES ─────────────────────────────────────
     if (req.method === "GET" && !action) {
       const records = await datasourcesCol.find({ userEmail }).toArray();
+      const user = await usersCol.findOne({ email: userEmail });
+
+      const ga4Rec = records.find((r) => r.provider === "google_analytics");
+      const ga4Status = await verifyGa4Status({
+        userEmail,
+        datasourceDoc: ga4Rec,
+        userProfile: user?.profile || {},
+        forceProbe: Boolean(req.query?.force || urlObj.searchParams.get("force")),
+        db,
+      });
 
       const sourceMap = {
         google_search_console: {
@@ -50,10 +61,21 @@ module.exports = async function handler(req, res) {
           accountEmail: null,
         },
         google_analytics: {
-          connected: false,
-          selectedProperty: null,
-          lastSuccessfulSync: null,
-          accountEmail: null,
+          connected: ga4Status.state === "connected" || ga4Status.state === "partially_configured",
+          isLinked: ga4Status.state !== "not_connected",
+          statusState: ga4Status.state,
+          statusBadge: ga4Status.badgeText,
+          statusClass: ga4Status.badgeClass,
+          statusMessage: ga4Status.message,
+          actionRequired: Boolean(ga4Status.actionRequired),
+          actionType: ga4Status.actionType || null,
+          actionLabel: ga4Status.actionLabel || null,
+          canMonitor: Boolean(ga4Status.canMonitor),
+          trafficState: ga4Status.trafficState || null,
+          ecommerce: ga4Status.ecommerce || null,
+          selectedProperty: ga4Rec?.selectedProperty || null,
+          lastSuccessfulSync: ga4Rec?.lastSuccessfulSync || null,
+          accountEmail: ga4Rec?.providerAccountId || null,
         },
         bing_webmaster: {
           connected: false,
@@ -64,7 +86,9 @@ module.exports = async function handler(req, res) {
 
       records.forEach((rec) => {
         const p = rec.provider;
-        if (sourceMap[p]) {
+        if (p === "google_analytics") {
+          // Already populated with verified status
+        } else if (sourceMap[p]) {
           sourceMap[p] = {
             connected: rec.status === "connected" && Boolean(rec.encryptedRefreshToken),
             selectedProperty: rec.selectedProperty || null,
@@ -75,6 +99,23 @@ module.exports = async function handler(req, res) {
       });
 
       return res.status(200).json({ ok: true, sources: sourceMap });
+    }
+
+    // ── 1B. ON-DEMAND VERIFY DATA SOURCE STATUS ──────────────────────────────
+    if (req.method === "GET" && action === "verify") {
+      if (provider === "google_analytics") {
+        const ga4Rec = await datasourcesCol.findOne({ userEmail, provider: "google_analytics" });
+        const user = await usersCol.findOne({ email: userEmail });
+        const ga4Status = await verifyGa4Status({
+          userEmail,
+          datasourceDoc: ga4Rec,
+          userProfile: user?.profile || {},
+          forceProbe: true,
+          db,
+        });
+        return res.status(200).json({ ok: true, status: ga4Status });
+      }
+      return res.status(400).json({ ok: false, error: `Unsupported verify provider: ${provider}` });
     }
 
     // ── 2. DISCOVER PROPERTIES FOR CONNECTED SOURCE ──────────────────────────
@@ -132,14 +173,18 @@ module.exports = async function handler(req, res) {
         };
 
         // Update datasources collection
+        const updateDoc = {
+          $set: {
+            selectedProperty,
+            updatedAt: new Date(),
+          },
+        };
+        if (targetProvider === "google_analytics") {
+          updateDoc.$unset = { ga4Verification: "" };
+        }
         await datasourcesCol.updateOne(
           { userEmail, provider: targetProvider },
-          {
-            $set: {
-              selectedProperty,
-              updatedAt: new Date(),
-            },
-          }
+          updateDoc
         );
 
         // Also update the user's Watchdog monitoring profile
@@ -181,6 +226,9 @@ module.exports = async function handler(req, res) {
               encryptedRefreshToken: null,
               selectedProperty: null,
               updatedAt: new Date(),
+            },
+            $unset: {
+              ga4Verification: "",
             },
           }
         );
