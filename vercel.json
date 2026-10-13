@@ -25,6 +25,7 @@
     { "source": "/api/user", "destination": "/api/user.js" },
     { "source": "/api/watchdog", "destination": "/api/watchdog.js" },
     { "source": "/api/admin-status", "destination": "/api/admin-status.js" },
+    { "source": "/api/paddle-webhook", "destination": "/api/paddle-webhook.js" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/privacy/", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
@@ -35,6 +36,7 @@
     { "source": "/contact/", "destination": "/contact.html" },
     { "source": "/robots.txt", "destination": "/robots.txt" },
     { "source": "/sitemap.xml", "destination": "/sitemap.xml" },
+    { "source": "/", "has": [{ "type": "query", "key": "code" }], "destination": "/api/oauth-callback" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -387,7 +387,13 @@ module.exports = async function handler(req, res) {
     const errorDescription = req.query.error_description || urlObj.searchParams.get("error_description");
 
     // If state is not in query params (e.g. Bing Webmaster OAuth omits state on redirect),
-    // recover the signed state token from cookie or database pending record
+    // recover the signed state token in priority order:
+    // 1. the sharflow_oauth_state cookie (already implemented, keep it first)
+    // 2. ONLY if no cookie is present: the oauth_pending DB lookup, but it must NOT pick an
+    //    arbitrary user's entry. If more than one pending bing_webmaster entry exists in the
+    //    last 20 minutes, do NOT guess: fail safely with the existing "Missing authorization
+    //    code or state token." error page instead of attaching tokens to a possibly wrong
+    //    account. Use the DB fallback only when exactly one candidate exists.
     if (!state) {
       const cookies = parseCookies(req);
       if (cookies.sharflow_oauth_state) {
@@ -399,12 +405,16 @@ module.exports = async function handler(req, res) {
       try {
         const db = await getDb();
         const cutoff = new Date(Date.now() - 20 * 60 * 1000);
-        const pending = await db.collection("oauth_pending").findOne(
-          { provider: "bing_webmaster", updatedAt: { $gte: cutoff } },
-          { sort: { updatedAt: -1 } }
-        );
-        if (pending && pending.stateToken) {
-          state = pending.stateToken;
+        const candidates = await db
+          .collection("oauth_pending")
+          .find({ provider: "bing_webmaster", updatedAt: { $gte: cutoff } })
+          .limit(2)
+          .toArray();
+
+        if (candidates.length === 1 && candidates[0].stateToken) {
+          state = candidates[0].stateToken;
+        } else if (candidates.length > 1) {
+          console.warn("[OAuth] Multiple pending bing_webmaster states found in last 20m without cookie; refusing to attach to an ambiguous account.");
         }
       } catch (dbFindErr) {
         console.warn("[OAuth] Could not query pending oauth state:", dbFindErr.message);

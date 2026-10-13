@@ -5,7 +5,13 @@ require("dotenv").config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+app.use(
+  express.json({
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString("utf8");
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Serve frontend assets cleanly from directories
@@ -62,6 +68,15 @@ app.get(["/privacy", "/privacy/"], (req, res) => {
 
 app.get(["/terms", "/terms/"], (req, res) => {
   res.sendFile(path.join(__dirname, "terms.html"));
+});
+
+// Handle OAuth callbacks hitting root "/" (e.g. Bing Webmaster OAuth)
+app.get("/", async (req, res, next) => {
+  if (req.query && (req.query.code || req.query.error)) {
+    const callbackHandler = require("./api/oauth-callback");
+    return callbackHandler(req, res);
+  }
+  next();
 });
 
 // Serve root-level files like favicon or specific assets
