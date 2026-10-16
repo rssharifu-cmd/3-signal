@@ -28,6 +28,9 @@ if (!mongoUri) {
  * @returns {Promise<import('mongodb').Db>}
  */
 async function getDb() {
+  if (global.__mockDb) {
+    return global.__mockDb;
+  }
   if (!mongoUri) {
     throw new Error("MONGODB_URI environment variable is missing. Cannot establish database connection.");
   }

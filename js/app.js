@@ -217,21 +217,43 @@ async function initPaddle() {
   }
 }
 
+async function refreshUserPlanFromServer(retries = 4, delayMs = 2000) {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) return false;
+
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch("/api/user", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.user) {
+          applyUserToLocalState(data.user);
+          updateBillingPanelUI();
+          if (data.user.plan === "pro") {
+            toast("🎉 Subscription verified! Welcome to Sharflow Pro.");
+            return true;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[Paddle] Error refreshing user plan:", err.message);
+    }
+    if (attempt < retries) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  return false;
+}
+
 function handlePaddleEvent(data) {
   if (!data || !data.name) return;
-  console.log("[Paddle Event]", data.name, data);
+  console.log("[Paddle Event]", data.name);
   if (data.name === "checkout.completed") {
-    toast("🎉 Payment successful! Welcome to Sharflow Pro.");
-    localStorage.setItem(STORAGE.plan, "pro");
-    const token = localStorage.getItem(STORAGE.token);
-    if (token) {
-      fetch("/api/user", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ plan: "pro" }),
-      }).catch(() => {});
-    }
-    updateBillingPanelUI();
+    toast("Checkout received! Verifying subscription activation with Paddle...");
+    // Refresh subscription status from server — never grant Pro directly from client
+    refreshUserPlanFromServer();
   }
 }
 
@@ -3226,4 +3248,5 @@ window.saveProfilePreferences = saveProfilePreferences;
 window.openPaddleCheckout = openPaddleCheckout;
 window.checkoutSharflowPro = checkoutSharflowPro;
 window.updateBillingPanelUI = updateBillingPanelUI;
+window.refreshUserPlanFromServer = refreshUserPlanFromServer;
 window.SHARFLOW_PRO_PRICE_ID = SHARFLOW_PRO_PRICE_ID;

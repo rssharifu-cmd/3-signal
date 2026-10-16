@@ -231,11 +231,16 @@ async function paddleApiRequest(endpoint, { method = "GET", body, apiKey } = {})
   return data;
 }
 
+function getPaddleProPriceId() {
+  return (process.env.PADDLE_PRICE_ID_PRO || "pri_01m4tf8w6602rpfrhv9mbrcm7b").trim();
+}
+
 module.exports = {
   getPaddleEnv,
   getPaddleBaseUrl,
   getPaddleApiKey,
   getPaddleWebhookSecret,
+  getPaddleProPriceId,
   parsePaddleSignatureHeader,
   verifyPaddleWebhookSignature,
   paddleApiRequest,

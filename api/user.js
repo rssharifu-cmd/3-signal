@@ -3,7 +3,7 @@
  *
  * All routes require Authorization: Bearer <token>
  *
- * POST { profile, settings, plan } — save website watchdog profile & settings
+ * POST { profile, settings, name } — save website watchdog profile & settings (plan is read-only)
  * GET — returns authenticated user + profile + settings
  */
 
@@ -112,7 +112,11 @@ async function handler(req, res) {
       if (body.name && typeof body.name === "string" && body.name.trim()) {
         update.$set.name = body.name.trim();
       }
-      if (body.plan) update.$set.plan = body.plan;
+      // SECURITY: Disallow self-assigned plans. Plan changes can only be granted
+      // via verified Paddle server-side webhook events or administrative action.
+      if (body.plan !== undefined && body.plan !== user.plan) {
+        console.warn(`[Security Alert] User ${email} attempted unauthorized plan modification to '${body.plan}'. Ignored.`);
+      }
 
       // ── SAVE Watchdog Profile ───────────────────────────────────────────────
       if (body.profile && typeof body.profile === "object") {
