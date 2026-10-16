@@ -269,6 +269,24 @@ async function openPaddleCheckout(priceIdOverride) {
     return;
   }
 
+  let checkoutToken = null;
+  const token = localStorage.getItem(STORAGE.token);
+  if (token) {
+    try {
+      const res = await fetch("/api/user?action=checkout_token", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.ok && d.checkoutToken) {
+          checkoutToken = d.checkoutToken;
+        }
+      }
+    } catch (tokenErr) {
+      console.warn("[Paddle Checkout] Could not retrieve checkout link token:", tokenErr.message);
+    }
+  }
+
   try {
     if (window.Paddle && window.Paddle.Checkout && typeof window.Paddle.Checkout.open === "function") {
       window.Paddle.Checkout.open({
@@ -286,6 +304,7 @@ async function openPaddleCheckout(priceIdOverride) {
         ],
         customer: userEmail ? { email: userEmail } : undefined,
         customData: {
+          checkoutToken: checkoutToken || undefined,
           email: userEmail || undefined,
           plan: "pro",
           source: "sharflow_web",
@@ -2501,24 +2520,18 @@ function resetAll() {
 }
 
 window.onload = async () => {
-  // Check if returning from a successful Paddle checkout
+  // Check if returning from a Paddle checkout
   try {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("checkout") === "success") {
-      toast("🎉 Payment successful! Welcome to Sharflow Pro.");
-      localStorage.setItem(STORAGE.plan, "pro");
-      const token = localStorage.getItem(STORAGE.token);
-      if (token) {
-        fetch("/api/user", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ plan: "pro" }),
-        }).catch(() => {});
-      }
       urlParams.delete("checkout");
       const newQuery = urlParams.toString();
       const newUrl = window.location.pathname + (newQuery ? `?${newQuery}` : "") + window.location.hash;
       window.history.replaceState(null, "", newUrl);
+
+      toast("Checkout received! Verifying subscription status with Paddle...");
+      // Verify exclusively through server response — never assume Pro client-side
+      refreshUserPlanFromServer();
     }
   } catch {}
 

@@ -54,6 +54,9 @@ async function handler(req, res) {
     const db = await getDb();
     const users = db.collection("users");
 
+    const urlObj = new URL(req.url || "/api/user", "http://localhost");
+    const queryAction = req.query?.action || urlObj.searchParams.get("action");
+
     if (req.method === "GET") {
       let user = await users.findOne({ email });
       if (!user) {
@@ -77,6 +80,22 @@ async function handler(req, res) {
         };
         await users.insertOne(user);
       }
+
+      if (queryAction === "checkout_token") {
+        const secret = (process.env.JWT_SECRET || "").trim();
+        const checkoutToken = jwt.sign(
+          {
+            userId: user._id.toString(),
+            email: user.email,
+            purpose: "paddle_checkout_link",
+          },
+          secret,
+          { expiresIn: "2h" }
+        );
+        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutToken, updatedAt: new Date() } });
+        return res.status(200).json({ ok: true, checkoutToken });
+      }
+
       return res.status(200).json({ ok: true, user: safeUser(user) });
     }
 
@@ -105,6 +124,21 @@ async function handler(req, res) {
           updatedAt: now,
         };
         await users.insertOne(user);
+      }
+
+      if (body.action === "checkout_token") {
+        const secret = (process.env.JWT_SECRET || "").trim();
+        const checkoutToken = jwt.sign(
+          {
+            userId: user._id.toString(),
+            email: user.email,
+            purpose: "paddle_checkout_link",
+          },
+          secret,
+          { expiresIn: "2h" }
+        );
+        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutToken, updatedAt: now } });
+        return res.status(200).json({ ok: true, checkoutToken });
       }
 
       const update = { $set: { updatedAt: now } };
