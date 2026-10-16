@@ -10,10 +10,11 @@
     "dev": "node server.js",
     "build": "echo 'No build phase needed for static web'",
     "start": "node server.js",
-    "lint": "node -c server.js api/_lib/cryptoUtils.js api/_lib/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js api/watchdog.js api/send.js api/admin-status.js api/_lib/preferences.js api/_lib/generateDailyIntelligence.js api/_lib/intelligence.js api/_lib/anomalies.js api/_lib/research/index.js api/_lib/ga4Status.js api/_lib/paddle.js api/paddle-webhook.js scripts/test-ga4-status.js scripts/test-paddle-webhook.js scripts/run-watchdog-scheduler.js js/app.js",
+    "lint": "node -c server.js api/_lib/cryptoUtils.js api/_lib/oauthTokens.js api/oauth.js api/oauth-callback.js api/datasources.js api/auth.js api/user.js api/watchdog.js api/send.js api/admin-status.js api/_lib/preferences.js api/_lib/generateDailyIntelligence.js api/_lib/intelligence.js api/_lib/anomalies.js api/_lib/research/index.js api/_lib/ga4Status.js api/_lib/paddle.js api/paddle-webhook.js scripts/test-ga4-status.js scripts/test-paddle-webhook.js scripts/test-routes-and-compliance.js scripts/run-watchdog-scheduler.js js/app.js",
     "test:ga4": "node scripts/test-ga4-status.js",
     "test:paddle": "node scripts/test-paddle-webhook.js",
-    "test": "node scripts/test-ga4-status.js && node scripts/test-paddle-webhook.js"
+    "test:compliance": "node scripts/test-routes-and-compliance.js",
+    "test": "node scripts/test-ga4-status.js && node scripts/test-paddle-webhook.js && node scripts/test-routes-and-compliance.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

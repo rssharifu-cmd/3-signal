@@ -77,10 +77,21 @@ async function handler(req, res) {
   const urlObj = new URL(req.url || "/api/auth", `http://${req.headers?.host || "localhost"}`);
   const queryAction = req.query?.action || urlObj.searchParams.get("action") || "";
 
-  // ── GET /api/auth?action=config — public Google Client ID for GIS button ──
+  // ── GET /api/auth?action=config — public Google Client ID & Paddle config ──
   if (req.method === "GET" && queryAction === "config") {
     const googleClientId = normalizeGoogleClientId(process.env.GOOGLE_CLIENT_ID) || null;
-    return res.status(200).json({ ok: true, googleClientId });
+    const paddleEnv = (process.env.PADDLE_ENV || "live").trim().toLowerCase();
+    const paddleClientToken = (process.env.PADDLE_CLIENT_TOKEN || "").trim() || null;
+    const paddlePriceId = (process.env.PADDLE_PRICE_ID_PRO || "pri_01m4tf8w6602rpfrhv9mbrcm7b").trim();
+    return res.status(200).json({
+      ok: true,
+      googleClientId,
+      paddle: {
+        env: paddleEnv,
+        clientToken: paddleClientToken,
+        defaultPriceId: paddlePriceId,
+      },
+    });
   }
 
   const jwtSecret = (process.env.JWT_SECRET || "").trim();

@@ -148,6 +148,197 @@ async function hydrateSession() {
   }
 }
 
+// ── Paddle Billing v2 Configuration & Checkout ─────────────────────────────
+const SHARFLOW_PRO_PRICE_ID = "pri_01m4tf8w6602rpfrhv9mbrcm7b";
+
+let cachedPaddleConfig = {
+  env: "live",
+  clientToken: null,
+  defaultPriceId: SHARFLOW_PRO_PRICE_ID,
+};
+let paddleInitialized = false;
+
+async function fetchPaddleConfig() {
+  try {
+    const res = await fetch("/api/auth?action=config");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.googleClientId) {
+        cachedGoogleClientId = data.googleClientId;
+      }
+      if (data.paddle) {
+        cachedPaddleConfig.env = data.paddle.env || cachedPaddleConfig.env;
+        cachedPaddleConfig.clientToken = data.paddle.clientToken || cachedPaddleConfig.clientToken;
+        if (data.paddle.defaultPriceId) {
+          cachedPaddleConfig.defaultPriceId = data.paddle.defaultPriceId;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Could not fetch configuration:", err.message);
+  }
+}
+
+async function initPaddle() {
+  if (paddleInitialized) return true;
+  await fetchPaddleConfig();
+
+  // Wait briefly if async Paddle script is loading
+  let attempts = 0;
+  while (!window.Paddle && attempts < 25) {
+    await new Promise((r) => setTimeout(r, 120));
+    attempts++;
+  }
+
+  if (!window.Paddle) {
+    console.warn("Paddle.js library is not available.");
+    return false;
+  }
+
+  try {
+    if (cachedPaddleConfig.env === "sandbox" && window.Paddle.Environment?.set) {
+      window.Paddle.Environment.set("sandbox");
+    }
+
+    if (cachedPaddleConfig.clientToken && window.Paddle.Initialize) {
+      const currentEmail = localStorage.getItem(STORAGE.email) || "";
+      window.Paddle.Initialize({
+        token: cachedPaddleConfig.clientToken,
+        pwCustomer: currentEmail ? { email: currentEmail } : undefined,
+        eventCallback: handlePaddleEvent,
+      });
+      paddleInitialized = true;
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.warn("Paddle initialization notice:", err.message);
+    return false;
+  }
+}
+
+function handlePaddleEvent(data) {
+  if (!data || !data.name) return;
+  console.log("[Paddle Event]", data.name, data);
+  if (data.name === "checkout.completed") {
+    toast("🎉 Payment successful! Welcome to Sharflow Pro.");
+    localStorage.setItem(STORAGE.plan, "pro");
+    const token = localStorage.getItem(STORAGE.token);
+    if (token) {
+      fetch("/api/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ plan: "pro" }),
+      }).catch(() => {});
+    }
+    updateBillingPanelUI();
+  }
+}
+
+async function openPaddleCheckout(priceIdOverride) {
+  const priceId = priceIdOverride || cachedPaddleConfig.defaultPriceId || SHARFLOW_PRO_PRICE_ID;
+  const userEmail = localStorage.getItem(STORAGE.email) || "";
+
+  const initialized = await initPaddle();
+
+  if (!initialized || !cachedPaddleConfig.clientToken) {
+    console.info("[Paddle Checkout] Client token not configured yet. Checkout remains safely disabled during early access preview.");
+    toast("Sharflow Pro online checkout is currently in early-access mode. Contact hello@sharflow.online for early access.");
+    return;
+  }
+
+  try {
+    if (window.Paddle && window.Paddle.Checkout && typeof window.Paddle.Checkout.open === "function") {
+      window.Paddle.Checkout.open({
+        settings: {
+          displayMode: "overlay",
+          theme: "light",
+          locale: "en",
+          successUrl: `${window.location.origin}/?checkout=success`,
+        },
+        items: [
+          {
+            priceId: priceId,
+            quantity: 1,
+          },
+        ],
+        customer: userEmail ? { email: userEmail } : undefined,
+        customData: {
+          email: userEmail || undefined,
+          plan: "pro",
+          source: "sharflow_web",
+          priceId: priceId,
+        },
+      });
+    } else {
+      toast("Paddle checkout library is not available. Please try again later.");
+    }
+  } catch (err) {
+    console.error("Failed to open Paddle Checkout:", err);
+    toast("Paddle Checkout: " + (err.message || "Could not open checkout modal."));
+  }
+}
+
+function checkoutSharflowPro() {
+  openPaddleCheckout(SHARFLOW_PRO_PRICE_ID);
+}
+
+function updateBillingPanelUI() {
+  const currentPlan = (localStorage.getItem(STORAGE.plan) || "starter").toLowerCase();
+  const isPro = currentPlan === "pro" || currentPlan === "sharflow_pro";
+
+  const badge = document.getElementById("dash-plan-badge");
+  const title = document.getElementById("current-plan-title");
+  const desc = document.getElementById("current-plan-desc");
+  const status = document.getElementById("billing-plan-status");
+  const actionContainer = document.getElementById("plan-action-container");
+
+  if (badge) {
+    badge.textContent = isPro ? "Current Plan: Sharflow Pro" : "Current Plan: Starter";
+    badge.className = "badge-pill badge-neutral";
+    if (isPro) {
+      badge.style.background = "var(--green-soft)";
+      badge.style.color = "var(--green)";
+      badge.style.borderColor = "#A7F3D0";
+    } else {
+      badge.style.background = "";
+      badge.style.color = "";
+      badge.style.borderColor = "";
+    }
+  }
+
+  if (title) {
+    title.textContent = isPro ? "Sharflow Pro Active" : "Sharflow Starter";
+  }
+
+  if (desc) {
+    desc.textContent = isPro
+      ? "Continuous 24/7 Watchdog monitoring, deep GA4 e-commerce tracking, and priority alerts are enabled."
+      : "Free early access plan with baseline website checks.";
+  }
+
+  if (status) {
+    status.textContent = isPro ? "Active Pro Subscriber" : "Active (Free)";
+    status.style.color = "var(--green)";
+  }
+
+  if (actionContainer) {
+    if (isPro) {
+      actionContainer.innerHTML = `
+        <div style="background:var(--green-soft);border:1px solid #A7F3D0;border-radius:6px;padding:12px;text-align:center;color:var(--green);font-weight:600;font-size:14px;">
+          ✓ You are currently subscribed to Sharflow Pro
+        </div>
+      `;
+    } else {
+      actionContainer.innerHTML = `
+        <button class="btn btn-primary btn-block" id="btn-dashboard-upgrade-pro" onclick="checkoutSharflowPro()">
+          Upgrade to Sharflow Pro ($29/mo) →
+        </button>
+      `;
+    }
+  }
+}
+
 // ── Auth ────────────────────────────────────────────────────────────────────
 let googleAuthInitialized = false;
 let cachedGoogleClientId = null;
@@ -159,11 +350,7 @@ async function initGoogleSignIn() {
 
   try {
     if (!cachedGoogleClientId) {
-      const res = await fetch("/api/auth?action=config");
-      if (res.ok) {
-        const data = await res.json();
-        cachedGoogleClientId = data.googleClientId || null;
-      }
+      await fetchPaddleConfig();
     }
     if (!cachedGoogleClientId) return;
 
@@ -1077,6 +1264,7 @@ function showDashboard(lockDate, profileText, email) {
   document.getElementById("onboarding-view").classList.add("hidden");
   document.getElementById("dashboard-view").classList.remove("hidden");
   document.getElementById("phase-label").textContent = "Dashboard";
+  updateBillingPanelUI();
 
   const hr = new Date().getHours();
   const greet = hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
@@ -2242,6 +2430,9 @@ function dashNav(panel) {
   if (panel === "sources") {
     loadDataSources();
   }
+  if (panel === "billing") {
+    updateBillingPanelUI();
+  }
   try {
     if (panel === "overview") {
       history.replaceState(null, "", window.location.pathname + window.location.search);
@@ -2288,6 +2479,30 @@ function resetAll() {
 }
 
 window.onload = async () => {
+  // Check if returning from a successful Paddle checkout
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("checkout") === "success") {
+      toast("🎉 Payment successful! Welcome to Sharflow Pro.");
+      localStorage.setItem(STORAGE.plan, "pro");
+      const token = localStorage.getItem(STORAGE.token);
+      if (token) {
+        fetch("/api/user", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ plan: "pro" }),
+        }).catch(() => {});
+      }
+      urlParams.delete("checkout");
+      const newQuery = urlParams.toString();
+      const newUrl = window.location.pathname + (newQuery ? `?${newQuery}` : "") + window.location.hash;
+      window.history.replaceState(null, "", newUrl);
+    }
+  } catch {}
+
+  // Initialize Paddle client in background
+  initPaddle();
+
   if (tryMigrateLegacy()) {
     showDashboard(new Date(localStorage.getItem(STORAGE.lock)), localStorage.getItem(STORAGE.profile));
     return;
@@ -3008,3 +3223,7 @@ window.exportReportCSV = exportReportCSV;
 window.toggleProfilePreferencesEditor = toggleProfilePreferencesEditor;
 window.renderProfilePreferencesEditor = renderProfilePreferencesEditor;
 window.saveProfilePreferences = saveProfilePreferences;
+window.openPaddleCheckout = openPaddleCheckout;
+window.checkoutSharflowPro = checkoutSharflowPro;
+window.updateBillingPanelUI = updateBillingPanelUI;
+window.SHARFLOW_PRO_PRICE_ID = SHARFLOW_PRO_PRICE_ID;

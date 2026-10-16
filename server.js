@@ -70,6 +70,10 @@ app.get(["/terms", "/terms/"], (req, res) => {
   res.sendFile(path.join(__dirname, "terms.html"));
 });
 
+app.get(["/refund", "/refund/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "refund.html"));
+});
+
 // Handle OAuth callbacks hitting root "/" (e.g. Bing Webmaster OAuth)
 app.get("/", async (req, res, next) => {
   if (req.query && (req.query.code || req.query.error)) {
