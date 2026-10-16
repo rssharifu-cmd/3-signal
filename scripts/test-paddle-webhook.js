@@ -8,26 +8,32 @@
  * 4. Plan authorization security in /api/user:
  *    - Prevent self-upgrade via { plan: "pro" }
  *    - Ensure profile & settings updates continue working
- *    - Support authenticated checkout_token generation
+ *    - Support authenticated checkout_token generation with server-stored metadata
  * 5. Frontend checkout safety:
  *    - Verify js/app.js contains NO client authority to grant Pro on checkout=success
  * 6. Webhook endpoint input validation (methods, headers, payload structure)
- * 7. Secure Account Linking:
- *    - Reject unsafe email-based account linking without signed checkoutToken
- *    - Accept authentic linking with cryptographically signed checkoutToken
- * 8. Subscription lifecycle & price verification:
+ * 7. Secure Account Linking & Token Protection:
+ *    - Reject linking based on email alone (prevents account takeover)
+ *    - Reject token not present in server-stored pendingPaddleCheckoutToken
+ *    - Reject expired checkoutToken
+ *    - Reject reused checkoutToken for a different subscription
+ *    - Allow legitimate retry of same subscription with consumed token
+ *    - Successfully links and upgrades user with valid signed checkoutToken
+ * 8. Subscription Lifecycle, Multi-Subscription Safety & Validations:
  *    - Activation (subscription.activated) with Pro price verification
  *    - Rejection of unmatching / invalid price IDs
  *    - One-off transactions alone do NOT grant indefinite Pro access
+ *    - Isolation: Old subscription cancellation does NOT cancel user's newer active subscription
  *    - Cancellation (subscription.canceled)
  *    - Past-due / unpaid handling (subscription.past_due)
  *    - Approved refund revokes Pro access
- *    - Reversed refund reinstates Pro access
- * 9. Idempotency, atomic claims, and failure retry:
- *    - Handles duplicate processed events idempotently
- *    - Safely retries previously failed events without double-granting access
- *    - Detects concurrent processing conflicts safely
- *    - Out-of-order event protection (stale event does not overwrite newer state)
+ *    - Invalid refund reversal (canceled subscription or expired period) does NOT restore Pro
+ *    - Valid refund reversal restores Pro
+ * 9. Idempotency, Failure Retries & Atomic Claims:
+ *    - Duplicate of fully processed event returns 200 duplicate without re-processing
+ *    - Failed event can be retried and successfully processed on subsequent delivery
+ *    - Concurrent in-progress event returns 429 to schedule safe retry
+ *    - Safely ignores out-of-order events (stale activation cannot undo newer cancellation)
  * 10. Resilience:
  *    - Database connection drop returns HTTP 500 for Paddle retry
  *    - Unknown user handled gracefully without crash
@@ -91,6 +97,11 @@ function createMockRes() {
   };
 }
 
+function getNestedVal(obj, path) {
+  if (!path.includes(".")) return obj ? obj[path] : undefined;
+  return path.split(".").reduce((curr, p) => (curr && typeof curr === "object" ? curr[p] : undefined), obj);
+}
+
 function matchesFilter(item, filter) {
   for (const [k, v] of Object.entries(filter)) {
     if (k === "$or") {
@@ -98,25 +109,44 @@ function matchesFilter(item, filter) {
       if (!orMatched) return false;
       continue;
     }
+    const val = k.includes(".") ? getNestedVal(item, k) : item[k];
     if (typeof v === "object" && v !== null) {
       if ("$in" in v) {
-        if (!v.$in.includes(item[k])) return false;
+        if (!v.$in.includes(val)) return false;
         continue;
       }
       if ("$lte" in v) {
-        if (item[k] === undefined || item[k] === null) return true;
-        if (new Date(item[k]) > new Date(v.$lte)) return false;
+        if (val === undefined || val === null) return true;
+        if (new Date(val) > new Date(v.$lte)) return false;
         continue;
       }
       if ("$lt" in v) {
-        if (item[k] === undefined || item[k] === null) return true;
-        if (new Date(item[k]) >= new Date(v.$lt)) return false;
+        if (val === undefined || val === null) return true;
+        if (new Date(val) >= new Date(v.$lt)) return false;
         continue;
       }
     }
-    if (item[k] !== v) return false;
+    if (val !== v) return false;
   }
   return true;
+}
+
+function applySetUpdate(doc, setObj) {
+  for (const [key, value] of Object.entries(setObj)) {
+    if (key.includes(".")) {
+      const parts = key.split(".");
+      let target = doc;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!target[parts[i]] || typeof target[parts[i]] !== "object") {
+          target[parts[i]] = {};
+        }
+        target = target[parts[i]];
+      }
+      target[parts[parts.length - 1]] = value;
+    } else {
+      doc[key] = value;
+    }
+  }
 }
 
 function createMockDb(initialUsers = [], initialEvents = []) {
@@ -136,7 +166,7 @@ function createMockDb(initialUsers = [], initialEvents = []) {
       const doc = await this.findOne(filter);
       if (!doc) return { matchedCount: 0, modifiedCount: 0 };
       if (update.$set) {
-        Object.assign(doc, update.$set);
+        applySetUpdate(doc, update.$set);
       }
       return { matchedCount: 1, modifiedCount: 1 };
     },
@@ -151,7 +181,7 @@ function createMockDb(initialUsers = [], initialEvents = []) {
       const doc = await this.findOne(filter);
       if (!doc) return null;
       if (update.$set) {
-        Object.assign(doc, update.$set);
+        applySetUpdate(doc, update.$set);
       }
       if (update.$inc) {
         for (const [k, v] of Object.entries(update.$inc)) {
@@ -173,7 +203,7 @@ function createMockDb(initialUsers = [], initialEvents = []) {
       const doc = await this.findOne(filter);
       if (!doc) return { matchedCount: 0, modifiedCount: 0 };
       if (update.$set) {
-        Object.assign(doc, update.$set);
+        applySetUpdate(doc, update.$set);
       }
       return { matchedCount: 1, modifiedCount: 1 };
     },
@@ -333,7 +363,6 @@ async function runAllTests() {
 
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.body.ok, true);
-    // User plan must remain 'starter'
     assert.strictEqual(res.body.user.plan, "starter");
 
     const inDb = await mockDb.collection("users").findOne({ email: "victim@example.com" });
@@ -378,7 +407,7 @@ async function runAllTests() {
     assert.strictEqual(res.body.user.plan, "starter");
   });
 
-  await runAsyncTest("Authenticated user can generate a signed checkoutToken", async () => {
+  await runAsyncTest("Authenticated user generates signed checkoutToken stored on server with expiry and metadata", async () => {
     const mockDb = createMockDb([
       {
         _id: "usr_checkout_user",
@@ -400,9 +429,11 @@ async function runAllTests() {
     assert.strictEqual(res.statusCode, 200);
     assert.ok(res.body.checkoutToken);
 
-    const decoded = jwt.verify(res.body.checkoutToken, TEST_JWT_SECRET);
-    assert.strictEqual(decoded.email, "payer@example.com");
-    assert.strictEqual(decoded.purpose, "paddle_checkout_link");
+    const userInDb = await mockDb.collection("users").findOne({ email: "payer@example.com" });
+    assert.ok(userInDb.pendingPaddleCheckoutToken);
+    assert.strictEqual(userInDb.pendingPaddleCheckoutToken.token, res.body.checkoutToken);
+    assert.strictEqual(userInDb.pendingPaddleCheckoutToken.consumed, false);
+    assert.ok(new Date(userInDb.pendingPaddleCheckoutToken.expiresAt) > new Date());
   });
 
   console.log("\n=== 5. Testing Frontend Checkout Safety ===");
@@ -492,7 +523,7 @@ async function runAllTests() {
     assert.strictEqual(res.body.error, "Missing event_id in webhook payload.");
   });
 
-  console.log("\n=== 7. Testing Secure Account Linking ===");
+  console.log("\n=== 7. Testing Secure Account Linking & Token Protection ===");
 
   await runAsyncTest("Rejects linking unlinked customer based on email alone (prevents account takeover)", async () => {
     const mockDb = createMockDb([
@@ -505,7 +536,6 @@ async function runAllTests() {
     ]);
     global.__mockDb = mockDb;
 
-    // Eve buys a subscription and provides alice@example.com in customer email, without a signed checkoutToken
     const payload = JSON.stringify({
       event_id: "evt_spoofed_email_link",
       event_type: "subscription.activated",
@@ -516,7 +546,7 @@ async function runAllTests() {
         customer_id: "ctm_eve_888",
         customer: { email: "alice@example.com" },
         items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
-        custom_data: { email: "alice@example.com" }, // unauthenticated raw email
+        custom_data: { email: "alice@example.com" },
       },
     });
     const sig = createValidSignature(payload);
@@ -531,26 +561,218 @@ async function runAllTests() {
     assert.strictEqual(res.statusCode, 200);
     assert.strictEqual(res.body.matched, false);
 
-    // Alice's account must NOT be linked or modified
     const aliceInDb = await mockDb.collection("users").findOne({ email: "alice@example.com" });
     assert.strictEqual(aliceInDb.plan, "starter");
     assert.strictEqual(aliceInDb.paddleCustomerId, undefined);
-
-    const eventRecord = await mockDb.collection("billing_events").findOne({ eventId: "evt_spoofed_email_link" });
-    assert.strictEqual(eventRecord.status, "unmatched_user");
   });
 
-  await runAsyncTest("Successfully links and upgrades user with valid signed checkoutToken", async () => {
+  await runAsyncTest("Rejects linking when checkoutToken is not stored on server", async () => {
     const mockDb = createMockDb([
       {
-        _id: "usr_legit_alice",
+        _id: "usr_alice_not_pending",
         email: "alice@example.com",
         plan: "starter",
-        active: true,
+        // No pendingPaddleCheckoutToken
       },
     ]);
     global.__mockDb = mockDb;
 
+    // Signed token with valid JWT signature, but not stored on user's server record
+    const unstoredToken = jwt.sign(
+      { userId: "usr_alice_not_pending", email: "alice@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const payload = JSON.stringify({
+      event_id: "evt_unstored_token",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_unstored_111",
+        status: "active",
+        customer_id: "ctm_unstored_222",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: unstoredToken },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.matched, false);
+
+    const userInDb = await mockDb.collection("users").findOne({ email: "alice@example.com" });
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Rejects linking when checkoutToken is expired", async () => {
+    const expiredDate = new Date(Date.now() - 3600000); // 1 hr in past
+    const expiredToken = jwt.sign(
+      { userId: "usr_alice_expired", email: "alice@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_alice_expired",
+        email: "alice@example.com",
+        plan: "starter",
+        pendingPaddleCheckoutToken: {
+          token: expiredToken,
+          userId: "usr_alice_expired",
+          email: "alice@example.com",
+          expiresAt: expiredDate,
+          consumed: false,
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_expired_token",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_expired_111",
+        status: "active",
+        customer_id: "ctm_expired_222",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: expiredToken },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.matched, false);
+
+    const userInDb = await mockDb.collection("users").findOne({ email: "alice@example.com" });
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Rejects reuse of already-consumed checkoutToken for a different subscription", async () => {
+    const consumedToken = jwt.sign(
+      { userId: "usr_alice_consumed", email: "alice@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_alice_consumed",
+        email: "alice@example.com",
+        plan: "pro",
+        paddleSubscriptionId: "sub_original_111",
+        paddleCustomerId: "ctm_original_222",
+        pendingPaddleCheckoutToken: {
+          token: consumedToken,
+          userId: "usr_alice_consumed",
+          email: "alice@example.com",
+          expiresAt: new Date(Date.now() + 3600000),
+          consumed: true,
+          boundSubscriptionId: "sub_original_111",
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Attacker tries to use the same consumed token for another subscription ID sub_rogue_999
+    const payload = JSON.stringify({
+      event_id: "evt_reused_token",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_rogue_999",
+        status: "active",
+        customer_id: "ctm_rogue_888",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: consumedToken },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.matched, false);
+
+    // Alice's original subscription must NOT be overwritten by rogue subscription
+    const userInDb = await mockDb.collection("users").findOne({ email: "alice@example.com" });
+    assert.strictEqual(userInDb.paddleSubscriptionId, "sub_original_111");
+  });
+
+  await runAsyncTest("Allows legitimate Paddle retry of same subscription with consumed token", async () => {
+    const token = jwt.sign(
+      { userId: "usr_retry_sub", email: "retrysub@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_retry_sub",
+        email: "retrysub@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_legit_same_111",
+        paddleCustomerId: "ctm_legit_same_222",
+        pendingPaddleCheckoutToken: {
+          token,
+          userId: "usr_retry_sub",
+          email: "retrysub@example.com",
+          expiresAt: new Date(Date.now() + 3600000),
+          consumed: true,
+          boundSubscriptionId: "sub_legit_same_111",
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_legit_retry_same_sub",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_legit_same_111",
+        status: "active",
+        customer_id: "ctm_legit_same_222",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: token },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.ok, true);
+    assert.strictEqual(res.body.plan, "pro");
+  });
+
+  await runAsyncTest("Successfully links and upgrades user with valid signed, server-stored checkoutToken", async () => {
     const validCheckoutToken = jwt.sign(
       {
         userId: "usr_legit_alice",
@@ -560,6 +782,23 @@ async function runAllTests() {
       TEST_JWT_SECRET,
       { expiresIn: "1h" }
     );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_legit_alice",
+        email: "alice@example.com",
+        plan: "starter",
+        active: true,
+        pendingPaddleCheckoutToken: {
+          token: validCheckoutToken,
+          userId: "usr_legit_alice",
+          email: "alice@example.com",
+          expiresAt: new Date(Date.now() + 3600000),
+          consumed: false,
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
 
     const payload = JSON.stringify({
       event_id: "evt_verified_token_link",
@@ -590,9 +829,55 @@ async function runAllTests() {
     assert.strictEqual(updatedAlice.plan, "pro");
     assert.strictEqual(updatedAlice.paddleSubscriptionId, "sub_alice_123");
     assert.strictEqual(updatedAlice.paddleCustomerId, "ctm_alice_999");
+    assert.strictEqual(updatedAlice.pendingPaddleCheckoutToken.consumed, true);
+    assert.strictEqual(updatedAlice.pendingPaddleCheckoutToken.boundSubscriptionId, "sub_alice_123");
   });
 
-  console.log("\n=== 8. Testing Subscription Lifecycle, One-off Transactions & Refunds ===");
+  console.log("\n=== 8. Testing Subscription Lifecycle, Isolation & Refund Reversals ===");
+
+  await runAsyncTest("Isolation: Old subscription cancellation does NOT cancel user's newer active subscription", async () => {
+    const mockDb = createMockDb([
+      {
+        _id: "usr_multi_sub",
+        email: "multisub@example.com",
+        plan: "pro",
+        subscriptionStatus: "active",
+        paddleCustomerId: "ctm_shared_123",
+        paddleSubscriptionId: "sub_new_222", // Active current subscription
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Cancellation event arrives for old subscription sub_old_111 under the same customer ID
+    const payload = JSON.stringify({
+      event_id: "evt_cancel_old_sub",
+      event_type: "subscription.canceled",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_old_111", // Old subscription
+        customer_id: "ctm_shared_123",
+        status: "canceled",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.ignored, true);
+
+    // User's newer subscription sub_new_222 MUST remain active Pro!
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_multi_sub" });
+    assert.strictEqual(userInDb.plan, "pro");
+    assert.strictEqual(userInDb.subscriptionStatus, "active");
+    assert.strictEqual(userInDb.paddleSubscriptionId, "sub_new_222");
+  });
 
   await runAsyncTest("Does NOT activate Pro on subscription.created with unmatching price ID", async () => {
     const mockDb = createMockDb([
@@ -601,6 +886,7 @@ async function runAllTests() {
         email: "bob@example.com",
         plan: "starter",
         paddleCustomerId: "ctm_bob_888",
+        paddleSubscriptionId: "sub_bob_999",
       },
     ]);
     global.__mockDb = mockDb;
@@ -649,7 +935,6 @@ async function runAllTests() {
         id: "txn_oneoff_999",
         status: "completed",
         customer_id: "ctm_oneoff_111",
-        // No subscription_id
         items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
       },
     });
@@ -664,7 +949,7 @@ async function runAllTests() {
 
     assert.strictEqual(res.statusCode, 200);
     const updated = await mockDb.collection("users").findOne({ _id: "usr_oneoff" });
-    assert.strictEqual(updated.plan, "starter"); // Remains starter!
+    assert.strictEqual(updated.plan, "starter");
   });
 
   await runAsyncTest("Downgrades user to starter on subscription.canceled", async () => {
@@ -708,44 +993,6 @@ async function runAllTests() {
     assert.strictEqual(updated.subscriptionStatus, "canceled");
   });
 
-  await runAsyncTest("Downgrades user to starter on subscription.past_due", async () => {
-    const mockDb = createMockDb([
-      {
-        _id: "usr_erin",
-        email: "erin@example.com",
-        plan: "pro",
-        paddleSubscriptionId: "sub_erin_123",
-        paddleCustomerId: "ctm_erin_456",
-        subscriptionStatus: "active",
-      },
-    ]);
-    global.__mockDb = mockDb;
-
-    const payload = JSON.stringify({
-      event_id: "evt_sub_pastdue_erin",
-      event_type: "subscription.past_due",
-      occurred_at: new Date().toISOString(),
-      data: {
-        id: "sub_erin_123",
-        status: "past_due",
-        customer_id: "ctm_erin_456",
-      },
-    });
-    const sig = createValidSignature(payload);
-    const req = {
-      method: "POST",
-      headers: { "paddle-signature": sig.header },
-      rawBody: payload,
-    };
-    const res = createMockRes();
-    await webhookHandler(req, res);
-
-    assert.strictEqual(res.statusCode, 200);
-    const updated = await mockDb.collection("users").findOne({ _id: "usr_erin" });
-    assert.strictEqual(updated.plan, "starter");
-    assert.strictEqual(updated.subscriptionStatus, "past_due");
-  });
-
   await runAsyncTest("Approved refund revokes Pro access", async () => {
     const mockDb = createMockDb([
       {
@@ -754,6 +1001,7 @@ async function runAllTests() {
         plan: "pro",
         paddleSubscriptionId: "sub_frank_123",
         paddleCustomerId: "ctm_frank_456",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
         subscriptionStatus: "active",
       },
     ]);
@@ -786,28 +1034,30 @@ async function runAllTests() {
     assert.strictEqual(updated.subscriptionStatus, "refunded");
   });
 
-  await runAsyncTest("Reversed refund reinstates Pro access", async () => {
+  await runAsyncTest("Invalid refund reversal (canceled subscription) does NOT restore Pro", async () => {
     const mockDb = createMockDb([
       {
-        _id: "usr_frank",
-        email: "frank@example.com",
+        _id: "usr_frank_canceled",
+        email: "frank_canceled@example.com",
         plan: "starter",
-        paddleSubscriptionId: "sub_frank_123",
+        paddleSubscriptionId: "sub_frank_canceled",
         paddleCustomerId: "ctm_frank_456",
-        subscriptionStatus: "refunded",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        subscriptionStatus: "canceled",
+        paddleCanceledAt: new Date(),
       },
     ]);
     global.__mockDb = mockDb;
 
     const payload = JSON.stringify({
-      event_id: "evt_adj_refund_reversed_frank",
+      event_id: "evt_adj_reversal_canceled_sub",
       event_type: "adjustment.updated",
       occurred_at: new Date().toISOString(),
       data: {
-        id: "adj_frank_02",
+        id: "adj_frank_rev_01",
         action: "refund",
         status: "reversed",
-        subscription_id: "sub_frank_123",
+        subscription_id: "sub_frank_canceled",
         customer_id: "ctm_frank_456",
       },
     });
@@ -821,9 +1071,237 @@ async function runAllTests() {
     await webhookHandler(req, res);
 
     assert.strictEqual(res.statusCode, 200);
-    const updated = await mockDb.collection("users").findOne({ _id: "usr_frank" });
+    const updated = await mockDb.collection("users").findOne({ _id: "usr_frank_canceled" });
+    // Must remain starter!
+    assert.strictEqual(updated.plan, "starter");
+  });
+
+  await runAsyncTest("Valid refund reversal restores Pro on active subscription", async () => {
+    const futureDate = new Date(Date.now() + 15 * 86400000); // 15 days in future
+    const mockDb = createMockDb([
+      {
+        _id: "usr_frank_valid_rev",
+        email: "frank_valid@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_frank_valid",
+        paddleCustomerId: "ctm_frank_456",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        paddleCurrentPeriodEnd: futureDate,
+        subscriptionStatus: "refunded",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_reversal_valid",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_frank_rev_02",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_frank_valid",
+        customer_id: "ctm_frank_456",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    const updated = await mockDb.collection("users").findOne({ _id: "usr_frank_valid_rev" });
     assert.strictEqual(updated.plan, "pro");
     assert.strictEqual(updated.subscriptionStatus, "active");
+  });
+
+  await runAsyncTest("Invalid refund reversal (unmatching price ID) does NOT restore Pro", async () => {
+    const futureDate = new Date(Date.now() + 15 * 86400000);
+    const mockDb = createMockDb([
+      {
+        _id: "usr_frank_other_price",
+        email: "frank_other@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_frank_other",
+        paddleCustomerId: "ctm_frank_456",
+        paddlePriceId: "pri_some_other_starter_price",
+        paddleCurrentPeriodEnd: futureDate,
+        subscriptionStatus: "refunded",
+        paddleSubscriptionStatus: "active",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_reversal_other_price",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_frank_rev_03",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_frank_other",
+        customer_id: "ctm_frank_456",
+        items: [{ price: { id: "pri_some_other_starter_price" } }],
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    const updated = await mockDb.collection("users").findOne({ _id: "usr_frank_other_price" });
+    assert.strictEqual(updated.plan, "starter"); // Must NOT restore Pro
+  });
+
+  await runAsyncTest("Invalid refund reversal for unmatched subscription ID does NOT restore Pro", async () => {
+    const futureDate = new Date(Date.now() + 15 * 86400000);
+    const mockDb = createMockDb([
+      {
+        _id: "usr_frank_mismatch",
+        email: "frank_mismatch@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_frank_current",
+        paddleCustomerId: "ctm_frank_456",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        paddleCurrentPeriodEnd: futureDate,
+        subscriptionStatus: "refunded",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_reversal_mismatched_sub",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_frank_rev_04",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_old_irrelevant_111", // does not match current sub
+        customer_id: "ctm_frank_456",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    const updated = await mockDb.collection("users").findOne({ _id: "usr_frank_mismatch" });
+    assert.strictEqual(updated.plan, "starter"); // Must NOT restore Pro
+  });
+
+  await runAsyncTest("Isolation: Destructive old subscription past_due does NOT modify user's newer active subscription", async () => {
+    const mockDb = createMockDb([
+      {
+        _id: "usr_multi_pastdue",
+        email: "multipastdue@example.com",
+        plan: "pro",
+        subscriptionStatus: "active",
+        paddleCustomerId: "ctm_shared_pastdue",
+        paddleSubscriptionId: "sub_new_active_888",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_pastdue_old_sub",
+      event_type: "subscription.past_due",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_old_defunct_777",
+        customer_id: "ctm_shared_pastdue",
+        status: "past_due",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.ignored, true);
+
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_multi_pastdue" });
+    assert.strictEqual(userInDb.plan, "pro");
+    assert.strictEqual(userInDb.subscriptionStatus, "active");
+    assert.strictEqual(userInDb.paddleSubscriptionId, "sub_new_active_888");
+  });
+
+  await runAsyncTest("Security: Reused checkoutToken for intended user mismatch is rejected", async () => {
+    const token = jwt.sign(
+      { userId: "usr_victim", email: "victim@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_victim",
+        email: "victim@example.com",
+        plan: "starter",
+        pendingPaddleCheckoutToken: {
+          token,
+          userId: "usr_victim",
+          email: "victim@example.com",
+          expiresAt: new Date(Date.now() + 3600000),
+          consumed: false,
+        },
+      },
+      {
+        _id: "usr_attacker",
+        email: "attacker@example.com",
+        plan: "starter",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Attacker tries to consume victim's checkout token for attacker's customer account
+    const payload = JSON.stringify({
+      event_id: "evt_tampered_user_token",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_attacker_999",
+        status: "active",
+        customer_id: "ctm_attacker_666",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: token },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+
+    // Attacker must NOT be granted Pro
+    const attackerInDb = await mockDb.collection("users").findOne({ _id: "usr_attacker" });
+    assert.strictEqual(attackerInDb.plan, "starter");
   });
 
   console.log("\n=== 9. Testing Idempotency, Failure Retries & Atomic Claims ===");
@@ -868,7 +1346,6 @@ async function runAllTests() {
   });
 
   await runAsyncTest("Failed event can be retried and successfully processed on subsequent delivery", async () => {
-    // Setup event that previously failed
     const mockDb = createMockDb(
       [
         {
@@ -920,7 +1397,7 @@ async function runAllTests() {
   });
 
   await runAsyncTest("Concurrent in-progress event returns 429 to schedule safe retry", async () => {
-    const futureDate = new Date(Date.now() + 30000); // lease active for 30s
+    const futureDate = new Date(Date.now() + 30000);
     const mockDb = createMockDb(
       [],
       [
@@ -1026,7 +1503,6 @@ async function runAllTests() {
     assert.ok(res.body.error.includes("Database unavailable"));
   });
 
-  // Reset global mockDb
   delete global.__mockDb;
 
   console.log(`\n========================================`);

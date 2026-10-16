@@ -57,10 +57,11 @@ async function handler(req, res) {
     const urlObj = new URL(req.url || "/api/user", "http://localhost");
     const queryAction = req.query?.action || urlObj.searchParams.get("action");
 
+    const now = new Date();
+
     if (req.method === "GET") {
       let user = await users.findOne({ email });
       if (!user) {
-        const now = new Date();
         user = {
           email,
           name: email.split("@")[0] || "User",
@@ -83,6 +84,10 @@ async function handler(req, res) {
 
       if (queryAction === "checkout_token") {
         const secret = (process.env.JWT_SECRET || "").trim();
+        if (!secret) {
+          return res.status(500).json({ error: "Server misconfiguration: JWT_SECRET missing." });
+        }
+        const expiresAt = new Date(now.getTime() + 2 * 60 * 60 * 1000);
         const checkoutToken = jwt.sign(
           {
             userId: user._id.toString(),
@@ -92,7 +97,17 @@ async function handler(req, res) {
           secret,
           { expiresIn: "2h" }
         );
-        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutToken, updatedAt: new Date() } });
+        const checkoutTokenDoc = {
+          token: checkoutToken,
+          userId: user._id.toString(),
+          email: user.email,
+          createdAt: now,
+          expiresAt,
+          consumed: false,
+          consumedAt: null,
+          boundSubscriptionId: null,
+        };
+        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutTokenDoc, updatedAt: now } });
         return res.status(200).json({ ok: true, checkoutToken });
       }
 
@@ -101,11 +116,9 @@ async function handler(req, res) {
 
     if (req.method === "POST") {
       const body = parseBody(req);
-      const now = new Date();
 
       let user = await users.findOne({ email });
       if (!user) {
-        const now = new Date();
         user = {
           email,
           name: email.split("@")[0] || "User",
@@ -128,6 +141,10 @@ async function handler(req, res) {
 
       if (body.action === "checkout_token") {
         const secret = (process.env.JWT_SECRET || "").trim();
+        if (!secret) {
+          return res.status(500).json({ error: "Server misconfiguration: JWT_SECRET missing." });
+        }
+        const expiresAt = new Date(now.getTime() + 2 * 60 * 60 * 1000);
         const checkoutToken = jwt.sign(
           {
             userId: user._id.toString(),
@@ -137,7 +154,17 @@ async function handler(req, res) {
           secret,
           { expiresIn: "2h" }
         );
-        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutToken, updatedAt: now } });
+        const checkoutTokenDoc = {
+          token: checkoutToken,
+          userId: user._id.toString(),
+          email: user.email,
+          createdAt: now,
+          expiresAt,
+          consumed: false,
+          consumedAt: null,
+          boundSubscriptionId: null,
+        };
+        await users.updateOne({ email }, { $set: { pendingPaddleCheckoutToken: checkoutTokenDoc, updatedAt: now } });
         return res.status(200).json({ ok: true, checkoutToken });
       }
 

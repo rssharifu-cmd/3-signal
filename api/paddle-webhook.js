@@ -7,18 +7,23 @@
  *    - Unprocessed, failed, or expired-lease events can be retried without double-granting access.
  *    - Fully processed events return HTTP 200 without re-running state mutations.
  *    - Failures during user updates or event processing return HTTP 500 so Paddle retries.
- * 3. Secure authenticated account linking:
- *    - Only links unlinked customers/subscriptions when a cryptographically verified `checkoutToken`
- *      (signed by server JWT_SECRET) is present in `custom_data`.
+ * 3. Secure authenticated account linking with server-stored token binding:
+ *    - Cryptographically verifies checkoutToken (signed by server JWT_SECRET).
+ *    - Validates against server-stored pendingPaddleCheckoutToken, checking exact token, expiry, and intended user.
+ *    - Enforces safe consumption: prevents reuse for different subscriptions while allowing legitimate Paddle retries.
  *    - Never uses email or unauthenticated custom data alone to prove account ownership.
- * 4. Rigorous subscription and price validation:
+ * 4. Multi-subscription safety & destructive event isolation:
+ *    - Prevents events for old or unmatched subscriptions from downgrading or canceling newer subscriptions.
+ *    - Does not fall back from unmatched subscription ID to customer ID for destructive events.
+ * 5. Rigorous subscription and price validation:
  *    - Pro access requires matching configured Pro price ID AND active/paid subscription status.
  *    - One-off transactions without verified active subscription do NOT grant Pro access.
- * 5. Accurate refund & refund-reversal handling per Paddle documentation:
+ * 6. Accurate refund & refund-reversal handling per Paddle official documentation:
  *    - Approved refund: revokes Pro access, sets subscriptionStatus to 'refunded'.
- *    - Reversed refund: reinstates Pro access if subscription remains valid.
+ *    - Reversed refund: ONLY restores Pro if the relevant subscription is confirmed active/trialing,
+ *      not canceled, period still valid, and contains the configured Pro price ID.
  *    - Pending/rejected refunds: leaves active subscription untouched.
- * 6. Out-of-order event replay guard via occurred_at timestamps.
+ * 7. Out-of-order event replay guard via occurred_at timestamps.
  */
 
 const jwt = require("jsonwebtoken");
@@ -198,7 +203,11 @@ async function handler(req, res) {
         });
       }
 
-      if (existing.status === "unmatched_user" || existing.status === "ignored_out_of_order") {
+      if (
+        existing.status === "unmatched_user" ||
+        existing.status === "ignored_out_of_order" ||
+        existing.status === "ignored_mismatched_subscription"
+      ) {
         return res.status(200).json({
           ok: true,
           duplicate: true,
@@ -214,7 +223,7 @@ async function handler(req, res) {
         return res.status(429).json({ error: "Event currently processing. Retry scheduled." });
       }
 
-      // If event failed previously or lease expired, re-acquire lease
+      // If event failed previously or lease expired, re-acquire lease atomically
       if (typeof billingEvents.findOneAndUpdate === "function") {
         const claim = await billingEvents.findOneAndUpdate(
           {
@@ -239,7 +248,6 @@ async function handler(req, res) {
           return res.status(429).json({ error: "Concurrent claim collision. Retry scheduled." });
         }
       } else {
-        // Fallback for mock/simple collections
         await billingEvents.updateOne(
           { eventId },
           {
@@ -267,7 +275,6 @@ async function handler(req, res) {
         });
       } catch (insertErr) {
         if (insertErr.code === 11000) {
-          // Concurrent race condition during initial insert
           const concurrentDoc = await billingEvents.findOne({ eventId });
           if (concurrentDoc?.status === "processed") {
             return res.status(200).json({ ok: true, duplicate: true, eventId, message: "Event already processed." });
@@ -292,6 +299,10 @@ async function handler(req, res) {
     const customData = data.custom_data || data.customData || {};
 
     let user = null;
+    let userUpdate = {
+      paddleLastEventOccurredAt: occurredAt,
+      updatedAt: new Date(),
+    };
 
     // Step 4A: Check by authoritative subscription ID if present
     if (subscriptionId) {
@@ -299,11 +310,79 @@ async function handler(req, res) {
     }
 
     // Step 4B: Check by authoritative customer ID if present
+    // Safe guard: Do not fall back to customer ID if this is a specific subscriptionId and
+    // the customer already has a different active subscription (prevents old subscription cancellations
+    // from destroying a user's newer subscription)
     if (!user && customerId) {
-      user = await users.findOne({ paddleCustomerId: customerId });
+      const candidateByCustomer = await users.findOne({ paddleCustomerId: customerId });
+      if (candidateByCustomer) {
+        if (
+          subscriptionId &&
+          candidateByCustomer.paddleSubscriptionId &&
+          candidateByCustomer.paddleSubscriptionId !== subscriptionId
+        ) {
+          console.warn(
+            `[Paddle Webhook] Event subscription ${subscriptionId} does not match customer's active subscription ${candidateByCustomer.paddleSubscriptionId}. Refusing fallback and ignoring to protect current subscription.`
+          );
+          await billingEvents.updateOne(
+            { eventId },
+            {
+              $set: {
+                status: "ignored_mismatched_subscription",
+                processedAt: new Date(),
+                userId: candidateByCustomer._id,
+                userEmail: candidateByCustomer.email,
+                leaseExpiresAt: null,
+              },
+            }
+          );
+          return res.status(200).json({
+            ok: true,
+            ignored: true,
+            eventId,
+            message: "Mismatched subscription event ignored to protect current subscription.",
+          });
+        }
+
+        const isDestructiveSubEvent =
+          eventType === "subscription.canceled" ||
+          eventType === "subscription.past_due" ||
+          eventType === "subscription.paused" ||
+          (eventType === "subscription.updated" && ["canceled", "past_due", "paused"].includes((data.status || "").toLowerCase())) ||
+          ((eventType === "adjustment.created" || eventType === "adjustment.updated") &&
+            (data.action || "").toLowerCase() === "refund" &&
+            (data.status || "").toLowerCase() === "approved");
+
+        if (isDestructiveSubEvent && subscriptionId && candidateByCustomer.paddleSubscriptionId !== subscriptionId) {
+          console.warn(
+            `[Paddle Webhook] Destructive event ${eventType} for subscription ${subscriptionId} does not match verified user subscription. Refusing fallback to customer ID.`
+          );
+          await billingEvents.updateOne(
+            { eventId },
+            {
+              $set: {
+                status: "ignored_mismatched_subscription",
+                processedAt: new Date(),
+                userId: candidateByCustomer._id,
+                userEmail: candidateByCustomer.email,
+                leaseExpiresAt: null,
+              },
+            }
+          );
+          return res.status(200).json({
+            ok: true,
+            ignored: true,
+            eventId,
+            message: "Mismatched subscription event ignored to protect current subscription.",
+          });
+        }
+
+        user = candidateByCustomer;
+      }
     }
 
-    // Step 4C: If customer/subscription is not yet linked, ONLY link via cryptographically verified checkoutToken
+    // Step 4C: If customer/subscription is not yet linked, ONLY link via cryptographically verified,
+    // server-stored, unexpired, unconsumed checkoutToken
     if (!user) {
       const checkoutToken = customData.checkoutToken;
       if (checkoutToken && typeof checkoutToken === "string") {
@@ -320,13 +399,63 @@ async function handler(req, res) {
                 candidate = await users.findOne({ email: decoded.email.toLowerCase().trim() });
               }
 
-              // Verify candidate does not belong to a different customer
               if (candidate) {
-                if (!candidate.paddleCustomerId || candidate.paddleCustomerId === customerId) {
-                  user = candidate;
-                  console.log(`[Paddle Webhook] Cryptographically verified checkout token for user ${candidate.email}`);
+                const stored = candidate.pendingPaddleCheckoutToken;
+                const storedToken = typeof stored === "object" ? stored?.token : stored;
+                const isStoredMatch = storedToken && storedToken === checkoutToken;
+                const isExpired = stored?.expiresAt ? new Date(stored.expiresAt) <= now : false;
+                const isUserMismatch =
+                  (stored?.userId && stored.userId !== decoded.userId) ||
+                  (stored?.email && stored.email !== decoded.email) ||
+                  (decoded.userId && candidate._id && candidate._id.toString() !== decoded.userId) ||
+                  (decoded.email && candidate.email && candidate.email.toLowerCase() !== decoded.email.toLowerCase());
+
+                if (!isStoredMatch) {
+                  console.warn(`[Paddle Webhook] Rejected checkoutToken: Token does not match server-stored pending token for ${candidate.email}`);
+                } else if (isExpired) {
+                  console.warn(`[Paddle Webhook] Rejected checkoutToken: Token expired for ${candidate.email}`);
+                } else if (isUserMismatch) {
+                  console.warn(`[Paddle Webhook] Rejected checkoutToken: Intended user mismatch for ${candidate.email}`);
+                } else if (stored?.consumed) {
+                  // Allow legitimate Paddle retry of the same subscription activation
+                  if (subscriptionId && stored.boundSubscriptionId === subscriptionId) {
+                    console.log(`[Paddle Webhook] Permitting legitimate retry with consumed token for subscription ${subscriptionId}`);
+                    user = candidate;
+                  } else {
+                    console.warn(`[Paddle Webhook] Security Alert: Rejected reuse of already-consumed checkoutToken for subscription ${subscriptionId} (bound: ${stored.boundSubscriptionId})`);
+                  }
                 } else {
-                  console.warn(`[Paddle Webhook] Security mismatch: user ${candidate.email} already bound to customer ${candidate.paddleCustomerId}, rejected event customer ${customerId}`);
+                  // Valid unconsumed token matching server records!
+                  if (!candidate.paddleCustomerId || candidate.paddleCustomerId === customerId) {
+                    // Safe atomic consumption claim to prevent concurrent duplicate delivery race conditions
+                    const claimFilter = {
+                      _id: candidate._id,
+                      $or: [
+                        { "pendingPaddleCheckoutToken.consumed": false },
+                        { "pendingPaddleCheckoutToken.boundSubscriptionId": subscriptionId },
+                      ],
+                    };
+                    const claimUpdate = {
+                      $set: {
+                        "pendingPaddleCheckoutToken.consumed": true,
+                        "pendingPaddleCheckoutToken.boundSubscriptionId": subscriptionId,
+                        "pendingPaddleCheckoutToken.consumedAt": now,
+                        updatedAt: now,
+                      },
+                    };
+                    const claimRes = await users.updateOne(claimFilter, claimUpdate);
+                    if (claimRes && claimRes.matchedCount === 0) {
+                      console.warn(`[Paddle Webhook] Concurrent collision or token reuse detected for ${candidate.email} (sub: ${subscriptionId})`);
+                    } else {
+                      user = candidate;
+                      userUpdate["pendingPaddleCheckoutToken.consumed"] = true;
+                      userUpdate["pendingPaddleCheckoutToken.boundSubscriptionId"] = subscriptionId;
+                      userUpdate["pendingPaddleCheckoutToken.consumedAt"] = now;
+                      console.log(`[Paddle Webhook] Successfully verified and bound checkout token for user ${candidate.email}`);
+                    }
+                  } else {
+                    console.warn(`[Paddle Webhook] Security mismatch: user ${candidate.email} already bound to customer ${candidate.paddleCustomerId}, rejected event customer ${customerId}`);
+                  }
                 }
               }
             }
@@ -335,12 +464,11 @@ async function handler(req, res) {
           }
         }
       } else {
-        // Explicitly reject unauthenticated linking based on raw email alone
         console.warn(`[Paddle Webhook] Unlinked customer ${customerId} (sub: ${subscriptionId}) provided no verified checkoutToken. Refusing to guess account ownership.`);
       }
     }
 
-    // If no user found/verified in database
+    // If no user found or verified in database
     if (!user) {
       console.warn(`[Paddle Webhook] No matching verified user for event ${eventId} (sub: ${subscriptionId}, ctm: ${customerId}). Recorded as unmatched.`);
       await billingEvents.updateOne(
@@ -359,6 +487,35 @@ async function handler(req, res) {
         eventId,
         eventType,
         message: "Webhook recorded; customer not associated with a verified user account.",
+      });
+    }
+
+    // Safeguard: Prevent event for an old subscription from downgrading or modifying a user's newer subscription
+    if (
+      subscriptionId &&
+      user.paddleSubscriptionId &&
+      user.paddleSubscriptionId !== subscriptionId
+    ) {
+      console.warn(
+        `[Paddle Webhook] Event subscription ${subscriptionId} does not match user's current subscription ${user.paddleSubscriptionId}. Ignoring to protect current subscription.`
+      );
+      await billingEvents.updateOne(
+        { eventId },
+        {
+          $set: {
+            status: "ignored_mismatched_subscription",
+            processedAt: new Date(),
+            userId: user._id,
+            userEmail: user.email,
+            leaseExpiresAt: null,
+          },
+        }
+      );
+      return res.status(200).json({
+        ok: true,
+        ignored: true,
+        eventId,
+        message: "Mismatched subscription event ignored to protect current subscription.",
       });
     }
 
@@ -388,10 +545,6 @@ async function handler(req, res) {
     const proPriceId = getPaddleProPriceId();
     const subStatus = (data.status || "").toLowerCase();
     let updatedPlan = user.plan || "starter";
-    let userUpdate = {
-      paddleLastEventOccurredAt: occurredAt,
-      updatedAt: new Date(),
-    };
 
     if (customerId) userUpdate.paddleCustomerId = customerId;
     if (subscriptionId) userUpdate.paddleSubscriptionId = subscriptionId;
@@ -408,27 +561,33 @@ async function handler(req, res) {
           updatedPlan = "pro";
           userUpdate.plan = "pro";
           userUpdate.subscriptionStatus = subStatus;
+          userUpdate.paddleSubscriptionStatus = subStatus;
           userUpdate.paddlePriceId = proPriceId;
+          userUpdate.paddleCanceledAt = null; // Clear any previous cancellation
           if (data.current_billing_period?.ends_at) {
             userUpdate.paddleCurrentPeriodEnd = new Date(data.current_billing_period.ends_at);
           }
         } else {
           console.warn(`[Paddle Webhook] Subscription ${subscriptionId} active but does not contain Pro price ID ${proPriceId}.`);
           userUpdate.subscriptionStatus = subStatus;
+          userUpdate.paddleSubscriptionStatus = subStatus;
         }
       } else if (subStatus === "canceled") {
         updatedPlan = "starter";
         userUpdate.plan = "starter";
         userUpdate.subscriptionStatus = "canceled";
+        userUpdate.paddleSubscriptionStatus = "canceled";
         userUpdate.paddleCanceledAt = data.canceled_at ? new Date(data.canceled_at) : occurredAt;
       } else if (subStatus === "past_due") {
         updatedPlan = "starter";
         userUpdate.plan = "starter";
         userUpdate.subscriptionStatus = "past_due";
+        userUpdate.paddleSubscriptionStatus = "past_due";
       } else if (subStatus === "paused") {
         updatedPlan = "starter";
         userUpdate.plan = "starter";
         userUpdate.subscriptionStatus = "paused";
+        userUpdate.paddleSubscriptionStatus = "paused";
       }
     }
 
@@ -437,6 +596,7 @@ async function handler(req, res) {
       updatedPlan = "starter";
       userUpdate.plan = "starter";
       userUpdate.subscriptionStatus = "canceled";
+      userUpdate.paddleSubscriptionStatus = "canceled";
       userUpdate.paddleCanceledAt = data.canceled_at ? new Date(data.canceled_at) : occurredAt;
     }
 
@@ -445,6 +605,7 @@ async function handler(req, res) {
       updatedPlan = "starter";
       userUpdate.plan = "starter";
       userUpdate.subscriptionStatus = "past_due";
+      userUpdate.paddleSubscriptionStatus = "past_due";
     }
 
     // ── D. Subscription Paused ────────────────────────────────────────────────
@@ -452,6 +613,7 @@ async function handler(req, res) {
       updatedPlan = "starter";
       userUpdate.plan = "starter";
       userUpdate.subscriptionStatus = "paused";
+      userUpdate.paddleSubscriptionStatus = "paused";
     }
 
     // ── E. Transaction Events ─────────────────────────────────────────────────
@@ -459,7 +621,6 @@ async function handler(req, res) {
     else if (eventType === "transaction.completed" || eventType === "transaction.paid") {
       if (subStatus === "completed" || subStatus === "paid") {
         userUpdate.paddleLastPaymentAt = occurredAt;
-        // If tied to an active verified subscription with pro price, maintain active status
         if (subscriptionId && user.paddleSubscriptionId === subscriptionId && user.subscriptionStatus === "active") {
           updatedPlan = "pro";
           userUpdate.plan = "pro";
@@ -478,14 +639,44 @@ async function handler(req, res) {
           updatedPlan = "starter";
           userUpdate.plan = "starter";
           userUpdate.subscriptionStatus = "refunded";
+          userUpdate.paddleSubscriptionStatus = "refunded";
+          userUpdate.paddlePreviousSubscriptionStatus = user.paddleSubscriptionStatus || user.subscriptionStatus || "active";
           userUpdate.paddleRefundedAt = occurredAt;
         } else if (adjStatus === "reversed") {
-          // Reversed refund: reinstate Pro if subscription was previously active/refunded
-          if (user.subscriptionStatus === "refunded") {
+          // Official Paddle Validation: Only restore Pro after a refund reversal if the relevant
+          // subscription is confirmed to be active/trialing, not canceled, period is valid, and contains Pro price ID
+          const adjSubId = data.subscription_id || data.subscriptionId || subscriptionId;
+          const targetSubId = adjSubId || user.paddleSubscriptionId;
+          const isMatchingSub = Boolean(targetSubId && user.paddleSubscriptionId && user.paddleSubscriptionId === targetSubId);
+
+          const eventSubStatus = (data.subscription?.status || data.subscription_status || "").toLowerCase();
+          const userSubStatus = (user.paddleSubscriptionStatus || (user.subscriptionStatus !== "refunded" ? user.subscriptionStatus : "")).toLowerCase();
+
+          let isConfirmedActiveOrTrialing = false;
+          if (eventSubStatus) {
+            isConfirmedActiveOrTrialing = (eventSubStatus === "active" || eventSubStatus === "trialing");
+          } else if (userSubStatus) {
+            isConfirmedActiveOrTrialing = (userSubStatus === "active" || userSubStatus === "trialing");
+          } else if (user.subscriptionStatus === "refunded" && !user.paddleCanceledAt) {
+            const wasInvalid = ["canceled", "past_due", "paused"].includes((user.paddlePreviousSubscriptionStatus || "").toLowerCase());
+            isConfirmedActiveOrTrialing = !wasInvalid;
+          }
+
+          const hasProPrice = (user.paddlePriceId === proPriceId) || hasMatchingProPrice(data.items, proPriceId);
+          const isNotCanceled = !user.paddleCanceledAt && user.subscriptionStatus !== "canceled" && user.paddleSubscriptionStatus !== "canceled" && eventSubStatus !== "canceled";
+          const isPeriodValid = !user.paddleCurrentPeriodEnd || new Date(user.paddleCurrentPeriodEnd) > occurredAt;
+
+          if (isMatchingSub && isConfirmedActiveOrTrialing && hasProPrice && isNotCanceled && isPeriodValid) {
             updatedPlan = "pro";
             userUpdate.plan = "pro";
             userUpdate.subscriptionStatus = "active";
+            userUpdate.paddleSubscriptionStatus = "active";
             userUpdate.paddleRefundReversedAt = occurredAt;
+            console.log(`[Paddle Webhook] Refund reversal verified: reinstated Pro for user ${user.email} (sub: ${user.paddleSubscriptionId})`);
+          } else {
+            console.warn(
+              `[Paddle Webhook] Refund reversal not eligible for Pro restoration (matchingSub: ${isMatchingSub}, activeOrTrialing: ${isConfirmedActiveOrTrialing}, proPrice: ${hasProPrice}, notCanceled: ${isNotCanceled}, periodValid: ${isPeriodValid})`
+            );
           }
         }
       }
@@ -520,7 +711,6 @@ async function handler(req, res) {
 
   } catch (processingErr) {
     console.error(`[Paddle Webhook] Error during event processing for ${eventId}:`, processingErr);
-    // Mark status as failed and clear lease so Paddle retry can re-claim and re-process
     await billingEvents.updateOne(
       { eventId },
       {
@@ -533,7 +723,6 @@ async function handler(req, res) {
       }
     ).catch(() => {});
 
-    // Return 500 so Paddle schedules retry
     return res.status(500).json({ error: "Failed to process webhook. Retry scheduled." });
   }
 }
