@@ -39,6 +39,8 @@
  *    - Unknown user handled gracefully without crash
  */
 
+process.env.NODE_ENV = "test";
+
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
@@ -123,6 +125,16 @@ function matchesFilter(item, filter) {
       if ("$lt" in v) {
         if (val === undefined || val === null) return true;
         if (new Date(val) >= new Date(v.$lt)) return false;
+        continue;
+      }
+      if ("$gt" in v) {
+        if (val === undefined || val === null) return false;
+        if (new Date(val) <= new Date(v.$gt)) return false;
+        continue;
+      }
+      if ("$gte" in v) {
+        if (val === undefined || val === null) return false;
+        if (new Date(val) < new Date(v.$gte)) return false;
         continue;
       }
     }
@@ -664,6 +676,118 @@ async function runAllTests() {
     assert.strictEqual(userInDb.plan, "starter");
   });
 
+  await runAsyncTest("Rejects linking when checkoutToken has missing expiry timestamp", async () => {
+    const tokenNoExpiry = jwt.sign(
+      { userId: "usr_alice_noexp", email: "alice@example.com", purpose: "paddle_checkout_link" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    const mockDb = createMockDb([
+      {
+        _id: "usr_alice_noexp",
+        email: "alice@example.com",
+        plan: "starter",
+        pendingPaddleCheckoutToken: {
+          token: tokenNoExpiry,
+          userId: "usr_alice_noexp",
+          email: "alice@example.com",
+          expiresAt: null, // MISSING expiry timestamp!
+          consumed: false,
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_missing_expiry_token",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_noexp_111",
+        status: "active",
+        customer_id: "ctm_noexp_222",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: tokenNoExpiry },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.matched, false);
+
+    const userInDb = await mockDb.collection("users").findOne({ email: "alice@example.com" });
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Race condition: Superseded token is rejected by atomic consumption claim when newly issued token replaced it", async () => {
+    const oldToken = jwt.sign(
+      { userId: "usr_race_alice", email: "race_alice@example.com", purpose: "paddle_checkout_link", nonce: "old_superseded_token_1" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+    const newlyIssuedToken = jwt.sign(
+      { userId: "usr_race_alice", email: "race_alice@example.com", purpose: "paddle_checkout_link", nonce: "new_issued_token_2" },
+      TEST_JWT_SECRET,
+      { expiresIn: "1h" }
+    );
+
+    // The user refreshed/re-opened checkout and a new token was issued and saved in MongoDB
+    const mockDb = createMockDb([
+      {
+        _id: "usr_race_alice",
+        email: "race_alice@example.com",
+        plan: "starter",
+        pendingPaddleCheckoutToken: {
+          token: newlyIssuedToken, // New token in DB!
+          userId: "usr_race_alice",
+          email: "race_alice@example.com",
+          expiresAt: new Date(Date.now() + 3600000),
+          consumed: false,
+        },
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Delayed webhook arrives carrying the older, superseded token
+    const payload = JSON.stringify({
+      event_id: "evt_superseded_token_race",
+      event_type: "subscription.activated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "sub_superseded_111",
+        status: "active",
+        customer_id: "ctm_superseded_222",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+        custom_data: { checkoutToken: oldToken },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.matched, false);
+
+    // User must NOT be activated by the superseded token
+    const userInDb = await mockDb.collection("users").findOne({ email: "race_alice@example.com" });
+    assert.strictEqual(userInDb.plan, "starter");
+    assert.strictEqual(userInDb.pendingPaddleCheckoutToken.consumed, false);
+    assert.strictEqual(userInDb.pendingPaddleCheckoutToken.token, newlyIssuedToken);
+  });
+
   await runAsyncTest("Rejects reuse of already-consumed checkoutToken for a different subscription", async () => {
     const consumedToken = jwt.sign(
       { userId: "usr_alice_consumed", email: "alice@example.com", purpose: "paddle_checkout_link" },
@@ -1203,6 +1327,119 @@ async function runAllTests() {
     assert.strictEqual(res.statusCode, 200);
     const updated = await mockDb.collection("users").findOne({ _id: "usr_frank_mismatch" });
     assert.strictEqual(updated.plan, "starter"); // Must NOT restore Pro
+  });
+
+  await runAsyncTest("Refund reversal without embedded subscription status verifies via Paddle API and restores Pro", async () => {
+    const futureDate = new Date(Date.now() + 20 * 86400000);
+    const mockDb = createMockDb([
+      {
+        _id: "usr_api_rev",
+        email: "apirev@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_api_rev_123",
+        paddleCustomerId: "ctm_api_rev_456",
+        subscriptionStatus: "refunded",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Mock Paddle API endpoint GET /subscriptions/sub_api_rev_123 per official schema
+    global.__mockPaddleApi = async (url) => {
+      if (url === "/subscriptions/sub_api_rev_123") {
+        return {
+          data: {
+            id: "sub_api_rev_123",
+            status: "active",
+            customer_id: "ctm_api_rev_456",
+            items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+            current_billing_period: {
+              starts_at: new Date(Date.now() - 10 * 86400000).toISOString(),
+              ends_at: futureDate.toISOString(),
+            },
+            canceled_at: null,
+          },
+        };
+      }
+      return null;
+    };
+
+    // Event has NO embedded data.subscription or data.subscription_status
+    const payload = JSON.stringify({
+      event_id: "evt_adj_reversal_api_fetch",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_api_rev_01",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_api_rev_123",
+        customer_id: "ctm_api_rev_456",
+        items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    global.__mockPaddleApi = null;
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(res.body.plan, "pro");
+
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_api_rev" });
+    assert.strictEqual(userInDb.plan, "pro");
+    assert.strictEqual(userInDb.subscriptionStatus, "active");
+  });
+
+  await runAsyncTest("Refund reversal without embedded subscription status rejects when status is unknown / unconfirmed", async () => {
+    const mockDb = createMockDb([
+      {
+        _id: "usr_unknown_rev",
+        email: "unknownrev@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_unknown_rev_789",
+        paddleCustomerId: "ctm_unknown_rev_456",
+        subscriptionStatus: "refunded",
+        // Missing paddlePriceId, expired/missing period end, no paddleSubscriptionStatus
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    global.__mockPaddleApi = async () => null;
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_reversal_unknown_status",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_unknown_rev_02",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_unknown_rev_789",
+        customer_id: "ctm_unknown_rev_456",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    global.__mockPaddleApi = null;
+
+    assert.strictEqual(res.statusCode, 200);
+
+    // User must NOT be restored to Pro because status is unknown!
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_unknown_rev" });
+    assert.strictEqual(userInDb.plan, "starter");
   });
 
   await runAsyncTest("Isolation: Destructive old subscription past_due does NOT modify user's newer active subscription", async () => {

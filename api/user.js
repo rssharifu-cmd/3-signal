@@ -7,6 +7,7 @@
  * GET — returns authenticated user + profile + settings
  */
 
+const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { getDb } = require("./_lib/db");
 
@@ -93,6 +94,7 @@ async function handler(req, res) {
             userId: user._id.toString(),
             email: user.email,
             purpose: "paddle_checkout_link",
+            nonce: crypto.randomBytes(16).toString("hex"),
           },
           secret,
           { expiresIn: "2h" }
@@ -150,6 +152,7 @@ async function handler(req, res) {
             userId: user._id.toString(),
             email: user.email,
             purpose: "paddle_checkout_link",
+            nonce: crypto.randomBytes(16).toString("hex"),
           },
           secret,
           { expiresIn: "2h" }

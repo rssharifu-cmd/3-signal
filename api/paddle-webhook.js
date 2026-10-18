@@ -27,7 +27,12 @@
  */
 
 const jwt = require("jsonwebtoken");
-const { verifyPaddleWebhookSignature, getPaddleProPriceId } = require("./_lib/paddle");
+const {
+  verifyPaddleWebhookSignature,
+  getPaddleProPriceId,
+  paddleApiRequest,
+  getPaddleApiKey,
+} = require("./_lib/paddle");
 const { getDb } = require("./_lib/db");
 
 const config = {
@@ -402,23 +407,34 @@ async function handler(req, res) {
               if (candidate) {
                 const stored = candidate.pendingPaddleCheckoutToken;
                 const storedToken = typeof stored === "object" ? stored?.token : stored;
-                const isStoredMatch = storedToken && storedToken === checkoutToken;
-                const isExpired = stored?.expiresAt ? new Date(stored.expiresAt) <= now : false;
+                const isStoredMatch = Boolean(storedToken && storedToken === checkoutToken);
+                const hasValidExpiry = Boolean(
+                  stored?.expiresAt &&
+                  !isNaN(new Date(stored.expiresAt).getTime()) &&
+                  new Date(stored.expiresAt) > now
+                );
+                const intendedUserId = stored?.userId || decoded.userId;
                 const isUserMismatch =
-                  (stored?.userId && stored.userId !== decoded.userId) ||
-                  (stored?.email && stored.email !== decoded.email) ||
-                  (decoded.userId && candidate._id && candidate._id.toString() !== decoded.userId) ||
-                  (decoded.email && candidate.email && candidate.email.toLowerCase() !== decoded.email.toLowerCase());
+                  !intendedUserId ||
+                  String(candidate._id) !== String(intendedUserId) ||
+                  (decoded.userId && String(decoded.userId) !== String(candidate._id)) ||
+                  (stored?.email && stored.email.toLowerCase() !== candidate.email.toLowerCase()) ||
+                  (decoded.email && decoded.email.toLowerCase() !== candidate.email.toLowerCase());
 
                 if (!isStoredMatch) {
                   console.warn(`[Paddle Webhook] Rejected checkoutToken: Token does not match server-stored pending token for ${candidate.email}`);
-                } else if (isExpired) {
-                  console.warn(`[Paddle Webhook] Rejected checkoutToken: Token expired for ${candidate.email}`);
+                } else if (!hasValidExpiry) {
+                  console.warn(`[Paddle Webhook] Rejected checkoutToken: Token has missing, invalid, or expired timestamp for ${candidate.email}`);
                 } else if (isUserMismatch) {
                   console.warn(`[Paddle Webhook] Rejected checkoutToken: Intended user mismatch for ${candidate.email}`);
                 } else if (stored?.consumed) {
                   // Allow legitimate Paddle retry of the same subscription activation
-                  if (subscriptionId && stored.boundSubscriptionId === subscriptionId) {
+                  if (
+                    subscriptionId &&
+                    stored.boundSubscriptionId === subscriptionId &&
+                    isStoredMatch &&
+                    !isUserMismatch
+                  ) {
                     console.log(`[Paddle Webhook] Permitting legitimate retry with consumed token for subscription ${subscriptionId}`);
                     user = candidate;
                   } else {
@@ -427,9 +443,14 @@ async function handler(req, res) {
                 } else {
                   // Valid unconsumed token matching server records!
                   if (!candidate.paddleCustomerId || candidate.paddleCustomerId === customerId) {
-                    // Safe atomic consumption claim to prevent concurrent duplicate delivery race conditions
+                    // Safe atomic consumption claim:
+                    // Must match EXACT stored token, intended user ID, and unexpired timestamp ($gt: now).
+                    // This prevents an older delayed webhook from consuming a newly issued token!
                     const claimFilter = {
                       _id: candidate._id,
+                      "pendingPaddleCheckoutToken.token": checkoutToken,
+                      "pendingPaddleCheckoutToken.userId": String(candidate._id),
+                      "pendingPaddleCheckoutToken.expiresAt": { $gt: now },
                       $or: [
                         { "pendingPaddleCheckoutToken.consumed": false },
                         { "pendingPaddleCheckoutToken.boundSubscriptionId": subscriptionId },
@@ -444,14 +465,14 @@ async function handler(req, res) {
                       },
                     };
                     const claimRes = await users.updateOne(claimFilter, claimUpdate);
-                    if (claimRes && claimRes.matchedCount === 0) {
-                      console.warn(`[Paddle Webhook] Concurrent collision or token reuse detected for ${candidate.email} (sub: ${subscriptionId})`);
+                    if (!claimRes || claimRes.matchedCount === 0) {
+                      console.warn(`[Paddle Webhook] Atomic consumption failed (token superseded, expired, mismatched, or race condition) for ${candidate.email} (sub: ${subscriptionId})`);
                     } else {
                       user = candidate;
                       userUpdate["pendingPaddleCheckoutToken.consumed"] = true;
                       userUpdate["pendingPaddleCheckoutToken.boundSubscriptionId"] = subscriptionId;
                       userUpdate["pendingPaddleCheckoutToken.consumedAt"] = now;
-                      console.log(`[Paddle Webhook] Successfully verified and bound checkout token for user ${candidate.email}`);
+                      console.log(`[Paddle Webhook] Successfully verified and atomically bound checkout token for user ${candidate.email}`);
                     }
                   } else {
                     console.warn(`[Paddle Webhook] Security mismatch: user ${candidate.email} already bound to customer ${candidate.paddleCustomerId}, rejected event customer ${customerId}`);
@@ -639,32 +660,92 @@ async function handler(req, res) {
           updatedPlan = "starter";
           userUpdate.plan = "starter";
           userUpdate.subscriptionStatus = "refunded";
-          userUpdate.paddleSubscriptionStatus = "refunded";
-          userUpdate.paddlePreviousSubscriptionStatus = user.paddleSubscriptionStatus || user.subscriptionStatus || "active";
           userUpdate.paddleRefundedAt = occurredAt;
         } else if (adjStatus === "reversed") {
           // Official Paddle Validation: Only restore Pro after a refund reversal if the relevant
-          // subscription is confirmed to be active/trialing, not canceled, period is valid, and contains Pro price ID
+          // subscription is confirmed to be active/trialing, not canceled, period is valid, and contains Pro price ID.
+          // NEVER assume active when status is unknown!
           const adjSubId = data.subscription_id || data.subscriptionId || subscriptionId;
           const targetSubId = adjSubId || user.paddleSubscriptionId;
           const isMatchingSub = Boolean(targetSubId && user.paddleSubscriptionId && user.paddleSubscriptionId === targetSubId);
 
-          const eventSubStatus = (data.subscription?.status || data.subscription_status || "").toLowerCase();
-          const userSubStatus = (user.paddleSubscriptionStatus || (user.subscriptionStatus !== "refunded" ? user.subscriptionStatus : "")).toLowerCase();
+          let subDetails = null;
 
-          let isConfirmedActiveOrTrialing = false;
-          if (eventSubStatus) {
-            isConfirmedActiveOrTrialing = (eventSubStatus === "active" || eventSubStatus === "trialing");
-          } else if (userSubStatus) {
-            isConfirmedActiveOrTrialing = (userSubStatus === "active" || userSubStatus === "trialing");
-          } else if (user.subscriptionStatus === "refunded" && !user.paddleCanceledAt) {
-            const wasInvalid = ["canceled", "past_due", "paused"].includes((user.paddlePreviousSubscriptionStatus || "").toLowerCase());
-            isConfirmedActiveOrTrialing = !wasInvalid;
+          // 1. Check if subscription is embedded in the webhook payload (Paddle event schema with include/expansion)
+          if (data.subscription && typeof data.subscription === "object") {
+            subDetails = data.subscription;
           }
 
-          const hasProPrice = (user.paddlePriceId === proPriceId) || hasMatchingProPrice(data.items, proPriceId);
-          const isNotCanceled = !user.paddleCanceledAt && user.subscriptionStatus !== "canceled" && user.paddleSubscriptionStatus !== "canceled" && eventSubStatus !== "canceled";
-          const isPeriodValid = !user.paddleCurrentPeriodEnd || new Date(user.paddleCurrentPeriodEnd) > occurredAt;
+          // 2. If not embedded in event, fetch subscription directly from Paddle Billing API (GET /subscriptions/{id})
+          const canCallPaddleApi = Boolean(
+            global.__mockPaddleApi ||
+            (getPaddleApiKey() && process.env.NODE_ENV !== "test")
+          );
+
+          if (!subDetails && targetSubId && canCallPaddleApi) {
+            try {
+              const apiRes = typeof global.__mockPaddleApi === "function"
+                ? await global.__mockPaddleApi(`/subscriptions/${targetSubId}`)
+                : await paddleApiRequest(`/subscriptions/${targetSubId}`);
+              if (apiRes && apiRes.data) {
+                subDetails = apiRes.data;
+              }
+            } catch (apiErr) {
+              console.warn(`[Paddle Webhook] Could not fetch subscription ${targetSubId} from Paddle API:`, apiErr.message);
+            }
+          }
+
+          let subStatus = "";
+          let subItems = [];
+          let subPeriodEnd = null;
+          let subCanceledAt = null;
+
+          if (subDetails) {
+            subStatus = (subDetails.status || "").toLowerCase();
+            subItems = Array.isArray(subDetails.items) ? subDetails.items : [];
+            subPeriodEnd = subDetails.current_billing_period?.ends_at || null;
+            subCanceledAt = subDetails.canceled_at || null;
+          } else if (data.subscription_status) {
+            subStatus = data.subscription_status.toLowerCase();
+          } else if (
+            user.paddleSubscriptionStatus &&
+            ["active", "trialing", "past_due", "paused", "canceled"].includes(user.paddleSubscriptionStatus.toLowerCase())
+          ) {
+            // Explicitly verified known status recorded in database
+            subStatus = user.paddleSubscriptionStatus.toLowerCase();
+            subPeriodEnd = user.paddleCurrentPeriodEnd || null;
+            subCanceledAt = user.paddleCanceledAt || null;
+          } else if (
+            user.subscriptionStatus === "refunded" &&
+            user.paddleSubscriptionId &&
+            user.paddlePriceId === proPriceId &&
+            user.paddleCurrentPeriodEnd &&
+            new Date(user.paddleCurrentPeriodEnd) > occurredAt &&
+            !user.paddleCanceledAt
+          ) {
+            // Known verified active subscription with unexpired period and no cancellation prior to refund
+            subStatus = "active";
+            subPeriodEnd = user.paddleCurrentPeriodEnd;
+            subCanceledAt = null;
+          }
+
+          // CRITICAL: Never assume subscription is active when its status is unknown!
+          const isConfirmedActiveOrTrialing = (subStatus === "active" || subStatus === "trialing");
+
+          const hasProPrice =
+            (user.paddlePriceId === proPriceId) ||
+            hasMatchingProPrice(subItems, proPriceId) ||
+            hasMatchingProPrice(data.items, proPriceId);
+
+          const isNotCanceled =
+            !subCanceledAt &&
+            !user.paddleCanceledAt &&
+            subStatus !== "canceled" &&
+            user.subscriptionStatus !== "canceled" &&
+            (user.paddleSubscriptionStatus || "").toLowerCase() !== "canceled";
+
+          const periodEnd = subPeriodEnd || user.paddleCurrentPeriodEnd;
+          const isPeriodValid = !periodEnd || new Date(periodEnd) > occurredAt;
 
           if (isMatchingSub && isConfirmedActiveOrTrialing && hasProPrice && isNotCanceled && isPeriodValid) {
             updatedPlan = "pro";
@@ -672,10 +753,13 @@ async function handler(req, res) {
             userUpdate.subscriptionStatus = "active";
             userUpdate.paddleSubscriptionStatus = "active";
             userUpdate.paddleRefundReversedAt = occurredAt;
+            if (periodEnd) {
+              userUpdate.paddleCurrentPeriodEnd = new Date(periodEnd);
+            }
             console.log(`[Paddle Webhook] Refund reversal verified: reinstated Pro for user ${user.email} (sub: ${user.paddleSubscriptionId})`);
           } else {
             console.warn(
-              `[Paddle Webhook] Refund reversal not eligible for Pro restoration (matchingSub: ${isMatchingSub}, activeOrTrialing: ${isConfirmedActiveOrTrialing}, proPrice: ${hasProPrice}, notCanceled: ${isNotCanceled}, periodValid: ${isPeriodValid})`
+              `[Paddle Webhook] Refund reversal not eligible for Pro restoration (matchingSub: ${isMatchingSub}, activeOrTrialing: ${isConfirmedActiveOrTrialing} [status=${subStatus || 'unknown'}], proPrice: ${hasProPrice}, notCanceled: ${isNotCanceled}, periodValid: ${isPeriodValid})`
             );
           }
         }
