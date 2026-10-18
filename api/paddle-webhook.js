@@ -714,10 +714,13 @@ async function handler(req, res) {
           // Never assume subscription is active when its status is unknown or unconfirmed!
           const isConfirmedActiveOrTrialing = (subStatus === "active" || subStatus === "trialing");
 
-          const hasProPrice =
-            hasMatchingProPrice(subItems, proPriceId) ||
-            hasMatchingProPrice(data.items, proPriceId) ||
-            (user.paddlePriceId === proPriceId && (!subItems.length || hasMatchingProPrice(subItems, proPriceId)));
+          // Pro price validation: Require authoritative subscription details to confirm the configured Pro price ID in their actual items.
+          // Incomplete responses or empty items must fail closed without granting Pro.
+          const hasProPrice = Boolean(
+            Array.isArray(subItems) &&
+            subItems.length > 0 &&
+            hasMatchingProPrice(subItems, proPriceId)
+          );
 
           const isNotCanceled =
             !subCanceledAt &&

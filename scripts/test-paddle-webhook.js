@@ -1642,6 +1642,72 @@ async function runAllTests() {
     assert.ok(eventDoc.lastError.includes("Authoritative Paddle subscription verification failed"));
   });
 
+  await runAsyncTest("Refund reversal: Paddle active subscription with valid period but empty items array does NOT restore Pro", async () => {
+    const futureDate = new Date(Date.now() + 20 * 86400000);
+    const mockDb = createMockDb([
+      {
+        _id: "usr_empty_items_rev",
+        email: "empty_items@example.com",
+        plan: "starter",
+        subscriptionStatus: "refunded",
+        paddleSubscriptionId: "sub_empty_items_123",
+        paddleCustomerId: "ctm_empty_items_456",
+        paddlePriceId: TARGET_PRO_PRICE_ID, // Old Pro price ID stored in DB
+        paddleCurrentPeriodEnd: futureDate,
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Paddle returns an active subscription with valid future billing period but EMPTY items array
+    global.__mockPaddleApi = async (url) => {
+      if (url === "/subscriptions/sub_empty_items_123") {
+        return {
+          data: {
+            id: "sub_empty_items_123",
+            status: "active",
+            customer_id: "ctm_empty_items_456",
+            items: [], // Empty items array!
+            current_billing_period: {
+              starts_at: new Date(Date.now() - 5 * 86400000).toISOString(),
+              ends_at: futureDate.toISOString(),
+            },
+            canceled_at: null,
+          },
+        };
+      }
+      return null;
+    };
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_rev_empty_items",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_empty_items_01",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_empty_items_123",
+        customer_id: "ctm_empty_items_456",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    global.__mockPaddleApi = null;
+
+    assert.strictEqual(res.statusCode, 200);
+
+    // User must NOT regain Pro because items array is empty (fails closed)
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_empty_items_rev" });
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
   await runAsyncTest("Isolation: Destructive old subscription past_due does NOT modify user's newer active subscription", async () => {
     const mockDb = createMockDb([
       {
