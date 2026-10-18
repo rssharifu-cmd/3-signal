@@ -663,8 +663,8 @@ async function handler(req, res) {
           userUpdate.paddleRefundedAt = occurredAt;
         } else if (adjStatus === "reversed") {
           // Official Paddle Validation: Only restore Pro after a refund reversal if the relevant
-          // subscription is confirmed to be active/trialing, not canceled, period is valid, and contains Pro price ID.
-          // NEVER assume active when status is unknown!
+          // subscription is authoritatively confirmed to be active/trialing, not canceled, period is valid, and contains Pro price ID.
+          // NEVER assume active when status is unknown or use potentially stale database status!
           const adjSubId = data.subscription_id || data.subscriptionId || subscriptionId;
           const targetSubId = adjSubId || user.paddleSubscriptionId;
           const isMatchingSub = Boolean(targetSubId && user.paddleSubscriptionId && user.paddleSubscriptionId === targetSubId);
@@ -678,7 +678,7 @@ async function handler(req, res) {
 
           // 2. If not embedded in event, fetch subscription directly from Paddle Billing API (GET /subscriptions/{id})
           const canCallPaddleApi = Boolean(
-            global.__mockPaddleApi ||
+            typeof global.__mockPaddleApi === "function" ||
             (getPaddleApiKey() && process.env.NODE_ENV !== "test")
           );
 
@@ -691,7 +691,10 @@ async function handler(req, res) {
                 subDetails = apiRes.data;
               }
             } catch (apiErr) {
-              console.warn(`[Paddle Webhook] Could not fetch subscription ${targetSubId} from Paddle API:`, apiErr.message);
+              console.error(`[Paddle Webhook] Paddle API lookup failed for subscription ${targetSubId}:`, apiErr.message);
+              // Do not restore Pro using a potentially stale database status when the Paddle API lookup fails.
+              // Safely leave the user's plan unchanged and return a retryable error so Paddle retries.
+              throw new Error(`Authoritative Paddle subscription verification failed for ${targetSubId}: ${apiErr.message}`);
             }
           }
 
@@ -705,37 +708,16 @@ async function handler(req, res) {
             subItems = Array.isArray(subDetails.items) ? subDetails.items : [];
             subPeriodEnd = subDetails.current_billing_period?.ends_at || null;
             subCanceledAt = subDetails.canceled_at || null;
-          } else if (data.subscription_status) {
-            subStatus = data.subscription_status.toLowerCase();
-          } else if (
-            user.paddleSubscriptionStatus &&
-            ["active", "trialing", "past_due", "paused", "canceled"].includes(user.paddleSubscriptionStatus.toLowerCase())
-          ) {
-            // Explicitly verified known status recorded in database
-            subStatus = user.paddleSubscriptionStatus.toLowerCase();
-            subPeriodEnd = user.paddleCurrentPeriodEnd || null;
-            subCanceledAt = user.paddleCanceledAt || null;
-          } else if (
-            user.subscriptionStatus === "refunded" &&
-            user.paddleSubscriptionId &&
-            user.paddlePriceId === proPriceId &&
-            user.paddleCurrentPeriodEnd &&
-            new Date(user.paddleCurrentPeriodEnd) > occurredAt &&
-            !user.paddleCanceledAt
-          ) {
-            // Known verified active subscription with unexpired period and no cancellation prior to refund
-            subStatus = "active";
-            subPeriodEnd = user.paddleCurrentPeriodEnd;
-            subCanceledAt = null;
           }
 
-          // CRITICAL: Never assume subscription is active when its status is unknown!
+          // CRITICAL: Require authoritative current subscription confirmation from Paddle.
+          // Never assume subscription is active when its status is unknown or unconfirmed!
           const isConfirmedActiveOrTrialing = (subStatus === "active" || subStatus === "trialing");
 
           const hasProPrice =
-            (user.paddlePriceId === proPriceId) ||
             hasMatchingProPrice(subItems, proPriceId) ||
-            hasMatchingProPrice(data.items, proPriceId);
+            hasMatchingProPrice(data.items, proPriceId) ||
+            (user.paddlePriceId === proPriceId && (!subItems.length || hasMatchingProPrice(subItems, proPriceId)));
 
           const isNotCanceled =
             !subCanceledAt &&
@@ -744,8 +726,17 @@ async function handler(req, res) {
             user.subscriptionStatus !== "canceled" &&
             (user.paddleSubscriptionStatus || "").toLowerCase() !== "canceled";
 
-          const periodEnd = subPeriodEnd || user.paddleCurrentPeriodEnd;
-          const isPeriodValid = !periodEnd || new Date(periodEnd) > occurredAt;
+          // Period end validation: Require a present, valid current_billing_period.ends_at that is later than event time.
+          // Missing or invalid period end MUST fail closed!
+          let isPeriodValid = false;
+          let validPeriodEndDate = null;
+          if (subPeriodEnd && (typeof subPeriodEnd === "string" || subPeriodEnd instanceof Date)) {
+            const parsedPeriodEnd = new Date(subPeriodEnd);
+            if (!isNaN(parsedPeriodEnd.getTime()) && parsedPeriodEnd.getTime() > occurredAt.getTime()) {
+              isPeriodValid = true;
+              validPeriodEndDate = parsedPeriodEnd;
+            }
+          }
 
           if (isMatchingSub && isConfirmedActiveOrTrialing && hasProPrice && isNotCanceled && isPeriodValid) {
             updatedPlan = "pro";
@@ -753,13 +744,11 @@ async function handler(req, res) {
             userUpdate.subscriptionStatus = "active";
             userUpdate.paddleSubscriptionStatus = "active";
             userUpdate.paddleRefundReversedAt = occurredAt;
-            if (periodEnd) {
-              userUpdate.paddleCurrentPeriodEnd = new Date(periodEnd);
-            }
+            userUpdate.paddleCurrentPeriodEnd = validPeriodEndDate;
             console.log(`[Paddle Webhook] Refund reversal verified: reinstated Pro for user ${user.email} (sub: ${user.paddleSubscriptionId})`);
           } else {
             console.warn(
-              `[Paddle Webhook] Refund reversal not eligible for Pro restoration (matchingSub: ${isMatchingSub}, activeOrTrialing: ${isConfirmedActiveOrTrialing} [status=${subStatus || 'unknown'}], proPrice: ${hasProPrice}, notCanceled: ${isNotCanceled}, periodValid: ${isPeriodValid})`
+              `[Paddle Webhook] Refund reversal not eligible for Pro restoration (matchingSub: ${isMatchingSub}, activeOrTrialing: ${isConfirmedActiveOrTrialing} [status=${subStatus || 'unconfirmed'}], proPrice: ${hasProPrice}, notCanceled: ${isNotCanceled}, periodValid: ${isPeriodValid})`
             );
           }
         }

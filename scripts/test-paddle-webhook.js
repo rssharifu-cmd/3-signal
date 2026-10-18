@@ -1226,6 +1226,14 @@ async function runAllTests() {
         status: "reversed",
         subscription_id: "sub_frank_valid",
         customer_id: "ctm_frank_456",
+        subscription: {
+          id: "sub_frank_valid",
+          status: "active",
+          items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+          current_billing_period: {
+            ends_at: futureDate.toISOString(),
+          },
+        },
       },
     });
     const sig = createValidSignature(payload);
@@ -1440,6 +1448,198 @@ async function runAllTests() {
     // User must NOT be restored to Pro because status is unknown!
     const userInDb = await mockDb.collection("users").findOne({ _id: "usr_unknown_rev" });
     assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Refund reversal with missing current_billing_period.ends_at fails closed and does NOT restore Pro", async () => {
+    const mockDb = createMockDb([
+      {
+        _id: "usr_rev_missing_end",
+        email: "rev_missing_end@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_rev_missing_end",
+        paddleCustomerId: "ctm_missing_end",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        subscriptionStatus: "refunded",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_missing_period_end",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_missing_end_01",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_rev_missing_end",
+        customer_id: "ctm_missing_end",
+        subscription: {
+          id: "sub_rev_missing_end",
+          status: "active",
+          items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+          current_billing_period: null, // Missing current_billing_period.ends_at
+        },
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    assert.strictEqual(res.statusCode, 200);
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_rev_missing_end" });
+    // MUST fail closed: user remains starter
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Refund reversal with invalid or expired current_billing_period.ends_at fails closed and does NOT restore Pro", async () => {
+    const pastDate = new Date(Date.now() - 5 * 86400000); // 5 days in past
+    const mockDb = createMockDb([
+      {
+        _id: "usr_rev_invalid_end",
+        email: "rev_invalid_end@example.com",
+        plan: "starter",
+        paddleSubscriptionId: "sub_rev_invalid_end",
+        paddleCustomerId: "ctm_invalid_end",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        subscriptionStatus: "refunded",
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Test with invalid date string
+    const payloadInvalid = JSON.stringify({
+      event_id: "evt_adj_invalid_period_end",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_invalid_end_01",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_rev_invalid_end",
+        customer_id: "ctm_invalid_end",
+        subscription: {
+          id: "sub_rev_invalid_end",
+          status: "active",
+          items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+          current_billing_period: {
+            ends_at: "not-a-valid-date-string",
+          },
+        },
+      },
+    });
+    const sigInvalid = createValidSignature(payloadInvalid);
+    const reqInvalid = {
+      method: "POST",
+      headers: { "paddle-signature": sigInvalid.header },
+      rawBody: payloadInvalid,
+    };
+    const resInvalid = createMockRes();
+    await webhookHandler(reqInvalid, resInvalid);
+
+    assert.strictEqual(resInvalid.statusCode, 200);
+    let userInDb = await mockDb.collection("users").findOne({ _id: "usr_rev_invalid_end" });
+    assert.strictEqual(userInDb.plan, "starter");
+
+    // Test with expired past date
+    const payloadExpired = JSON.stringify({
+      event_id: "evt_adj_expired_period_end",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_expired_end_02",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_rev_invalid_end",
+        customer_id: "ctm_invalid_end",
+        subscription: {
+          id: "sub_rev_invalid_end",
+          status: "active",
+          items: [{ price: { id: TARGET_PRO_PRICE_ID } }],
+          current_billing_period: {
+            ends_at: pastDate.toISOString(),
+          },
+        },
+      },
+    });
+    const sigExpired = createValidSignature(payloadExpired);
+    const reqExpired = {
+      method: "POST",
+      headers: { "paddle-signature": sigExpired.header },
+      rawBody: payloadExpired,
+    };
+    const resExpired = createMockRes();
+    await webhookHandler(reqExpired, resExpired);
+
+    assert.strictEqual(resExpired.statusCode, 200);
+    userInDb = await mockDb.collection("users").findOne({ _id: "usr_rev_invalid_end" });
+    assert.strictEqual(userInDb.plan, "starter");
+  });
+
+  await runAsyncTest("Refund reversal: Paddle API failure does NOT restore Pro from stale database status and returns retryable 500", async () => {
+    const futureDate = new Date(Date.now() + 20 * 86400000);
+    const mockDb = createMockDb([
+      {
+        _id: "usr_stale_active_rev",
+        email: "stale_active@example.com",
+        plan: "starter",
+        subscriptionStatus: "refunded",
+        paddleSubscriptionStatus: "active", // Stale active status stored in DB!
+        paddleSubscriptionId: "sub_stale_fail_123",
+        paddleCustomerId: "ctm_stale_fail_456",
+        paddlePriceId: TARGET_PRO_PRICE_ID,
+        paddleCurrentPeriodEnd: futureDate,
+      },
+    ]);
+    global.__mockDb = mockDb;
+
+    // Simulate Paddle API failure (network timeout / 500 outage)
+    global.__mockPaddleApi = async () => {
+      throw new Error("Paddle API temporary network/500 outage");
+    };
+
+    const payload = JSON.stringify({
+      event_id: "evt_adj_rev_api_failure",
+      event_type: "adjustment.updated",
+      occurred_at: new Date().toISOString(),
+      data: {
+        id: "adj_stale_fail_01",
+        action: "refund",
+        status: "reversed",
+        subscription_id: "sub_stale_fail_123",
+        customer_id: "ctm_stale_fail_456",
+      },
+    });
+    const sig = createValidSignature(payload);
+    const req = {
+      method: "POST",
+      headers: { "paddle-signature": sig.header },
+      rawBody: payload,
+    };
+    const res = createMockRes();
+    await webhookHandler(req, res);
+
+    global.__mockPaddleApi = null;
+
+    // Must return retryable 500 error
+    assert.strictEqual(res.statusCode, 500);
+    assert.strictEqual(res.body.error, "Failed to process webhook. Retry scheduled.");
+
+    // User in DB must remain starter and plan must NOT be updated using stale active status!
+    const userInDb = await mockDb.collection("users").findOne({ _id: "usr_stale_active_rev" });
+    assert.strictEqual(userInDb.plan, "starter");
+    assert.strictEqual(userInDb.subscriptionStatus, "refunded");
+
+    // Event document in billingEvents must be marked failed with lease released for Paddle retry
+    const eventDoc = await mockDb.collection("billing_events").findOne({ eventId: "evt_adj_rev_api_failure" });
+    assert.strictEqual(eventDoc.status, "failed");
+    assert.strictEqual(eventDoc.leaseExpiresAt, null);
+    assert.ok(eventDoc.lastError.includes("Authoritative Paddle subscription verification failed"));
   });
 
   await runAsyncTest("Isolation: Destructive old subscription past_due does NOT modify user's newer active subscription", async () => {
