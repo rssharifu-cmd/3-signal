@@ -26,6 +26,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
 const { getDb } = require("./_lib/db");
+const { getEntitlements, TRIAL_DAYS } = require("./_lib/plans");
 
 const SALT_ROUNDS = 10;
 const JWT_EXPIRES = "7d";
@@ -64,10 +65,12 @@ function normalizeGoogleClientId(raw) {
     : `${trimmed}.apps.googleusercontent.com`;
 }
 
-// Strip sensitive fields before returning user to client
+// Strip sensitive fields before returning user to client, attach entitlements
 function safeUser(user) {
+  if (!user) return user;
   const { passwordHash, ...rest } = user;
-  return rest;
+  const entitlements = getEntitlements(user);
+  return { ...rest, entitlements };
 }
 
 async function handler(req, res) {
@@ -110,11 +113,15 @@ async function handler(req, res) {
       let user = await db.collection("users").findOne({ email: decoded.email });
       if (!user) {
         const now = new Date();
+        const trialStartedAt = now;
+        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
         user = {
           email: decoded.email,
           name: decoded.name || decoded.email.split("@")[0] || "User",
           passwordHash: "",
           plan: "starter",
+          trialStartedAt,
+          trialEndsAt,
           active: true,
           profile: null,
           createdAt: now,
@@ -189,6 +196,8 @@ async function handler(req, res) {
         user = { ...user, ...updatedFields };
       } else {
         // Create new user document
+        const trialStartedAt = now;
+        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
         user = {
           email,
           name: googleName,
@@ -196,6 +205,8 @@ async function handler(req, res) {
           googleSub,
           authProvider: "google",
           plan: "starter",
+          trialStartedAt,
+          trialEndsAt,
           active: true,
           profile: null,
           createdAt: now,
@@ -255,12 +266,17 @@ async function handler(req, res) {
       const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
       const now = new Date();
 
+      const trialStartedAt = now;
+      const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
       const newUser = {
         email,
         name,
         passwordHash,
         plan: "starter",
-        active: true,         // default active status for 3-day trial
+        trialStartedAt,
+        trialEndsAt,
+        active: true,         // default active status for 14-day trial
         profile: null,
         createdAt: now,
         updatedAt: now,

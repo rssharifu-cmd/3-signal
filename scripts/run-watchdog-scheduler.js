@@ -18,6 +18,7 @@ require("dotenv").config();
 const { getDb } = require("../api/_lib/db");
 const { generateDailyIntelligence } = require("../api/_lib/generateDailyIntelligence");
 const { sendWatchdogEmail } = require("../api/send");
+const { ensureTrial, getEntitlements } = require("../api/_lib/plans");
 
 const CONCURRENCY_LIMIT = 3;
 
@@ -36,6 +37,14 @@ async function processUser(user, db, targetDate) {
   const email = user.email;
   const userId = String(user._id);
   const websiteUrl = user.profile?.websiteUrl || "";
+
+  // 0. Ensure trial is initialized and verify monitoring entitlements
+  await ensureTrial(db, user);
+  const entitlements = getEntitlements(user);
+  if (entitlements.enforced && !entitlements.canRunMonitoring) {
+    console.log(`[Watchdog Scheduler] Skipping ${email}: skipped: trial ended, no active plan`);
+    return { status: "skipped_no_plan", email, reason: "trial_ended_no_active_plan" };
+  }
 
   // 1. Verify user has website configured or connected data source
   const datasourcesCol = db.collection("datasources");
@@ -178,6 +187,7 @@ async function run() {
   let processedCount = 0;
   let successCount = 0;
   let skippedCount = 0;
+  let skippedNoPlanCount = 0;
   let errorCount = 0;
   let emailsSentCount = 0;
 
@@ -196,6 +206,8 @@ async function run() {
         if (val.status === "success") {
           successCount++;
           if (val.emailSent) emailsSentCount++;
+        } else if (val.status === "skipped_no_plan") {
+          skippedNoPlanCount++;
         } else if (val.status === "skipped") {
           skippedCount++;
         } else {
@@ -215,6 +227,7 @@ async function run() {
   console.log(`Successfully analyzed: ${successCount}`);
   console.log(`Emails dispatched:     ${emailsSentCount}`);
   console.log(`Skipped (no site/dup): ${skippedCount}`);
+  console.log(`Skipped (no active plan): ${skippedNoPlanCount}`);
   console.log(`Errors encountered:    ${errorCount}`);
   console.log("==================================================");
 

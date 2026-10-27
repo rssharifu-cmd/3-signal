@@ -632,7 +632,8 @@ footer {
 .dash-nav-item.active { background: var(--accent-soft); color: var(--accent); }
 .dash-main { flex: 1; overflow-y: auto; padding: 24px 28px 40px; }
 .dash-header { margin-bottom: 24px; }
-.dash-header h1 {
+.dash-header h1,
+.dash-header h2 {
   font-family: var(--serif);
   font-size: 1.85rem;
   letter-spacing: -0.02em;

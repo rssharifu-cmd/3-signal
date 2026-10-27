@@ -70,6 +70,10 @@ app.get(["/terms", "/terms/"], (req, res) => {
   res.sendFile(path.join(__dirname, "terms.html"));
 });
 
+app.get(["/pricing", "/pricing/"], (req, res) => {
+  res.sendFile(path.join(__dirname, "pricing.html"));
+});
+
 app.get(["/refund", "/refund/"], (req, res) => {
   res.sendFile(path.join(__dirname, "refund.html"));
 });

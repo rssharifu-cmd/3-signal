@@ -26,6 +26,7 @@ jobs:
 
       - name: Execute Watchdog Scheduler
         env:
+          PLANS_ENFORCED: ${{ secrets.PLANS_ENFORCED }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

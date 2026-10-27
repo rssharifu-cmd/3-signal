@@ -12,7 +12,9 @@
   <meta property="og:url" content="https://sharflow.online/" />
   <meta property="og:title" content="Sharflow — AI Website Watchdog" />
   <meta property="og:description" content="Sharflow watches your website, detects important changes, and tells you what needs attention." />
-  <meta property="og:image" content="https://sharflow.online/assets/sharflow-logo.png" />
+  <meta property="og:image" content="https://sharflow.online/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="Sharflow — AI Website Watchdog" />
   <meta property="og:site_name" content="Sharflow" />
 
@@ -21,7 +23,7 @@
   <meta name="twitter:url" content="https://sharflow.online/" />
   <meta name="twitter:title" content="Sharflow — AI Website Watchdog" />
   <meta name="twitter:description" content="Sharflow watches your website, detects important changes, and tells you what needs attention." />
-  <meta name="twitter:image" content="https://sharflow.online/assets/sharflow-logo.png" />
+  <meta name="twitter:image" content="https://sharflow.online/assets/og-image.png" />
   <meta name="twitter:image:alt" content="Sharflow — AI Website Watchdog" />
 
   <!-- Structured Data: Organization JSON-LD -->
@@ -34,6 +36,32 @@
     "logo": "https://sharflow.online/assets/sharflow-logo.png",
     "description": "Sharflow watches your website, detects important changes, and tells you what needs attention.",
     "slogan": "You run your business. Sharflow watches your website."
+  }
+  </script>
+
+  <!-- Structured Data: SoftwareApplication JSON-LD -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Sharflow",
+    "applicationCategory": "BusinessApplication",
+    "operatingSystem": "Web",
+    "url": "https://sharflow.online/",
+    "offers": [
+      {
+        "@type": "Offer",
+        "name": "Analytics",
+        "price": "9",
+        "priceCurrency": "USD"
+      },
+      {
+        "@type": "Offer",
+        "name": "Complete",
+        "price": "19",
+        "priceCurrency": "USD"
+      }
+    ]
   }
   </script>
 
@@ -64,6 +92,8 @@
       }
     })();
   </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/app.css" />
   <!-- Paddle Billing v2 CDN -->
@@ -79,7 +109,7 @@
       <span class="nav-logo">Sharflow<em>.</em></span>
     </a>
     <div class="nav-actions" style="display:flex;align-items:center;gap:10px;">
-      <a href="#pricing" class="btn btn-ghost" style="text-decoration:none;font-weight:600;padding:8px 14px;font-size:13px;">Pricing</a>
+      <a href="/pricing" class="btn btn-ghost" style="text-decoration:none;font-weight:600;padding:8px 14px;font-size:13px;">Pricing</a>
       <button class="btn btn-ghost" onclick="openAuthModal('login')">Sign in</button>
       <button class="btn btn-primary" onclick="openAuthModal('signup')">Get started</button>
     </div>
@@ -94,11 +124,11 @@
     <h1>Your website may have problems<br/><span>you're not seeing.</span></h1>
     <p class="hero-lead">You run your business. Sharflow watches your website.<br/>Monitors key search and performance signals, spots meaningful changes, and alerts you only when something needs attention.</p>
     <div class="hero-actions">
-      <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
+      <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Get started free</button>
       <button class="btn btn-secondary btn-lg" onclick="document.getElementById('how-it-works').scrollIntoView({behavior:'smooth'})">How it works</button>
     </div>
 
-    <!-- Hero Concept Preview Card -->
+    <!-- Hero Alert Preview Card -->
     <div class="preview-card">
       <div class="preview-bar" style="display:flex;justify-content:space-between;align-items:center;padding:10px 18px;">
         <span>Example Watchdog Alert</span>
@@ -137,12 +167,12 @@
         <div class="step-card">
           <div class="step-num">1</div>
           <h3>Set up your website</h3>
-          <p>Connect your website as the Watchdog platform evolves. Setup will be designed to stay simple and focused on the signals that matter most.</p>
+          <p>Connect your website. Setup is designed to stay simple and focused on the signals that matter most.</p>
         </div>
         <div class="step-card">
           <div class="step-num">2</div>
           <h3>Signal detection</h3>
-          <p>Watchdog is being built to detect meaningful changes across search visibility, traffic trends, and technical health.</p>
+          <p>Watchdog detects meaningful changes across search visibility, traffic trends, and technical health.</p>
         </div>
         <div class="step-card">
           <div class="step-num">3</div>
@@ -185,23 +215,23 @@
     </div>
   </section>
 
-  <!-- What the Watchdog is designed to watch -->
+  <!-- What the Watchdog watches -->
   <section class="section alt" id="monitors">
     <div class="section-inner">
       <p class="section-label">Coverage</p>
-      <h2 class="section-title">What the Watchdog is designed to watch</h2>
-      <p class="section-desc">The Watchdog is being built to monitor the signals that matter across your website, search visibility, traffic, and technical health.</p>
+      <h2 class="section-title">What the Watchdog watches</h2>
+      <p class="section-desc">The Watchdog monitors the signals that matter across your website, search visibility, traffic, and technical health.</p>
 
       <div class="monitors-grid">
         <div class="monitor-card">
           <div class="monitor-card-header">
             <h3>Search visibility &amp; discovery</h3>
           </div>
-          <p>Designed to track meaningful shifts in organic impressions, search presence, and keyword visibility across key pages.</p>
+          <p>Tracks meaningful shifts in organic impressions, search presence, and keyword visibility across key pages.</p>
           <div class="monitor-chips">
             <span class="monitor-chip">Search visibility</span>
             <span class="monitor-chip">Impression trends</span>
-            <span class="monitor-chip">Planned search sync</span>
+            <span class="monitor-chip">Search sync</span>
           </div>
         </div>
 
@@ -209,11 +239,11 @@
           <div class="monitor-card-header">
             <h3>Traffic &amp; critical pages</h3>
           </div>
-          <p>Designed to catch unexpected visitor drops on your most important landing pages, pricing pages, and key content.</p>
+          <p>Catches unexpected visitor drops on your most important landing pages, pricing pages, and key content.</p>
           <div class="monitor-chips">
             <span class="monitor-chip">Key landing pages</span>
             <span class="monitor-chip">Traffic shifts</span>
-            <span class="monitor-chip">Planned analytics sync</span>
+            <span class="monitor-chip">Analytics sync</span>
           </div>
         </div>
 
@@ -221,7 +251,7 @@
           <div class="monitor-card-header">
             <h3>Technical &amp; indexing health</h3>
           </div>
-          <p>Designed to watch for crawl anomalies, broken links, accidental noindex tags, and page availability issues.</p>
+          <p>Watches for crawl anomalies, broken links, accidental noindex tags, and page availability issues.</p>
           <div class="monitor-chips">
             <span class="monitor-chip">Availability</span>
             <span class="monitor-chip">Indexing health</span>
@@ -233,7 +263,7 @@
           <div class="monitor-card-header">
             <h3>Content &amp; search opportunities</h3>
           </div>
-          <p>Designed to highlight search topics where your website is gaining traction and spot emerging growth opportunities.</p>
+          <p>Highlights search topics where your website is gaining traction and spots emerging growth opportunities.</p>
           <div class="monitor-chips">
             <span class="monitor-chip">Content momentum</span>
             <span class="monitor-chip">Emerging topics</span>
@@ -247,8 +277,8 @@
   <!-- Example of what an alert/brief could look like -->
   <section class="section" id="email-example">
     <div class="section-inner">
-      <p class="section-label">Concept Preview</p>
-      <h2 class="section-title">What an alert could look like</h2>
+      <p class="section-label">Example daily brief</p>
+      <h2 class="section-title">What an alert looks like</h2>
       <p class="section-desc">A ruthlessly focused brief designed to be understood in seconds.</p>
 
       <div class="email-showcase">
@@ -257,7 +287,7 @@
             <strong>Example Daily Brief</strong> · yourwebsite.com
           </div>
           <div class="email-status-pills">
-            <span class="badge-pill badge-neutral">Concept Demo</span>
+            <span class="badge-pill badge-neutral">Sample</span>
             <span class="badge-pill badge-alert">Needs Attention</span>
           </div>
         </div>
@@ -314,47 +344,15 @@
 
   <!-- Pricing Section -->
   <section class="section" id="pricing">
-    <div class="section-inner">
+    <div class="section-inner" style="text-align:center;max-width:760px;margin:0 auto;">
       <p class="section-label">Pricing</p>
-      <h2 class="section-title">Transparent plans for growing websites</h2>
-      <p class="section-desc">Start free or upgrade to Sharflow Pro for complete continuous website monitoring and instant priority alerts.</p>
-
-      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:24px;max-width:880px;margin:36px auto 0;">
-        <!-- Starter Plan -->
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px 28px;display:flex;flex-direction:column;box-shadow:var(--shadow-sm);">
-          <div style="display:inline-block;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Starter</div>
-          <h3 style="font-size:24px;margin-bottom:8px;">Free Early Access</h3>
-          <p style="font-size:14px;color:var(--muted);line-height:1.5;margin-bottom:20px;">Essential website health checking and daily manual digests.</p>
-          <div style="font-size:32px;font-weight:700;color:var(--text);margin-bottom:24px;">$0 <span style="font-size:14px;font-weight:500;color:var(--muted);">/ month</span></div>
-          <ul style="list-style:none;padding:0;margin:0 0 28px;font-size:14px;color:var(--text);display:flex;flex-direction:column;gap:12px;flex:1;">
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> 1 monitored website</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Basic search & traffic detection</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Daily website intelligence check</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Google Search Console integration</li>
-          </ul>
-          <button class="btn btn-secondary btn-block" onclick="openAuthModal('signup')">Get Started Free</button>
-        </div>
-
-        <!-- Sharflow Pro Plan -->
-        <div style="background:var(--surface);border:2px solid var(--accent);border-radius:var(--radius);padding:32px 28px;display:flex;flex-direction:column;position:relative;box-shadow:var(--shadow-md);">
-          <div style="position:absolute;top:-12px;right:24px;background:var(--accent);color:#fff;font-size:11px;font-weight:700;padding:4px 12px;border-radius:100px;text-transform:uppercase;letter-spacing:0.05em;">Recommended</div>
-          <div style="display:inline-block;font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Sharflow Pro</div>
-          <h3 style="font-size:24px;margin-bottom:8px;">Sharflow Pro</h3>
-          <p style="font-size:14px;color:var(--muted);line-height:1.5;margin-bottom:20px;">Continuous automated monitoring with real-time drop alerts & deep e-commerce tracking.</p>
-          <div style="font-size:32px;font-weight:700;color:var(--text);margin-bottom:6px;">$29 <span style="font-size:14px;font-weight:500;color:var(--muted);">/ month</span></div>
-          <div style="font-size:12px;color:var(--dim);margin-bottom:20px;">Paddle billing ID: pri_01m4tf8w6602rpfrhv9mbrcm7b</div>
-          <ul style="list-style:none;padding:0;margin:0 0 28px;font-size:14px;color:var(--text);display:flex;flex-direction:column;gap:12px;flex:1;">
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> <strong>Everything in Starter</strong></li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Continuous 24/7 Watchdog signal detection</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> GA4 E-commerce & funnel drop tracking</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Bing Webmaster & Copilot indexing health</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Priority email alerts on critical changes</li>
-            <li style="display:flex;gap:10px;align-items:center;"><span>✓</span> Customizable monitoring priorities & key pages</li>
-          </ul>
-          <button class="btn btn-primary btn-block" id="btn-upgrade-pro-landing" onclick="checkoutSharflowPro()">Upgrade to Pro →</button>
-          <div style="font-size:12px;color:var(--dim);text-align:center;margin-top:10px;">Secure checkout with Paddle · Cancel anytime</div>
-        </div>
+      <h2 class="section-title">Plans from $9 per month · 14-day free trial</h2>
+      <p class="section-desc" style="margin:0 auto 24px;max-width:620px;">Automated daily monitoring for Google Analytics, Search Console, and Bing Webmaster. Start your 14-day free trial with full access—no credit card required.</p>
+      <div style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;align-items:center;">
+        <a href="/pricing" class="btn btn-primary btn-lg" style="text-decoration:none;">View plans &amp; pricing →</a>
+        <button class="btn btn-secondary btn-lg" onclick="openAuthModal('signup')">Start 14-day free trial</button>
       </div>
+      <p style="font-size:12px;color:var(--dim);margin-top:16px;">Cancel anytime · Billed monthly · No credit card required to start</p>
     </div>
   </section>
 
@@ -365,7 +363,7 @@
         <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="52" height="61" style="height:52px;width:auto;margin:0 auto 16px;display:block;" />
         <h2>You run your business.<br/>Sharflow watches your website.</h2>
         <p>Join early access and get alerted when something important needs attention.</p>
-        <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start free trial</button>
+        <button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Get started free</button>
         <p class="cta-subtext">Early access · No credit card required</p>
       </div>
     </div>
@@ -380,6 +378,7 @@
       <p style="font-size:13px;color:var(--muted);margin:0;">You run your business. Sharflow watches your website.</p>
     </div>
     <p style="margin:0;font-size:12px;color:var(--dim);">
+      <a href="/pricing" style="color:var(--muted);font-size:12px;text-decoration:none;">Pricing</a> · 
       <a href="/about" style="color:var(--muted);font-size:12px;text-decoration:none;">About</a> · 
       <a href="/contact" style="color:var(--muted);font-size:12px;text-decoration:none;">Contact</a> · 
       <a href="/privacy" style="color:var(--muted);font-size:12px;text-decoration:none;">Privacy Policy</a> · 
@@ -604,11 +603,23 @@
           <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
             <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="34" height="40" style="height:36px;width:auto;display:block;flex-shrink:0;" />
             <div>
-              <h1 id="dash-greeting" style="margin:0;">Good afternoon</h1>
+              <h2 id="dash-greeting" style="margin:0;">Good afternoon</h2>
               <p style="margin:2px 0 0;font-size:13px;color:var(--muted);font-weight:500;">You run your business. Sharflow watches your website.</p>
             </div>
           </div>
           <p id="dash-subgreeting">Your website monitoring profile is configured. Data sources will be connected in the next phase.</p>
+        </div>
+
+        <!-- Free Trial Banner -->
+        <div id="dash-trial-banner" class="hidden" style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius-sm);padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:20px;">⏱️</span>
+            <div>
+              <strong id="dash-trial-banner-title" style="color:#1D4ED8;font-size:14px;">Free Trial Active</strong>
+              <div id="dash-trial-banner-desc" style="font-size:13px;color:#3B82F6;">You have full access to all features during your 14-day trial.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="dashNav('billing')">View Plans</button>
         </div>
 
         <!-- Watchdog Status Banner -->
@@ -667,7 +678,7 @@
       <!-- Data Sources panel -->
       <div class="dash-panel hidden" id="panel-sources">
         <div class="dash-header">
-          <h1>Data Sources</h1>
+          <h2>Data Sources</h2>
           <p>Connect your search and analytics platforms to feed live performance data into Sharflow Website Watchdog.</p>
         </div>
 
@@ -826,7 +837,7 @@
       <div class="dash-panel hidden" id="panel-digest">
         <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
-            <h1>Intelligence Report</h1>
+            <h2>Intelligence Report</h2>
             <p>On-demand audit — analyzes fresh live metrics across your connected data sources.</p>
           </div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -845,7 +856,7 @@
       <div class="dash-panel hidden" id="panel-profile">
         <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
-            <h1>Your website profile</h1>
+            <h2>Your website profile</h2>
             <p>Your monitoring profile configuration. Update your preferences anytime.</p>
           </div>
           <button class="btn btn-secondary btn-sm" id="btn-edit-preferences" onclick="toggleProfilePreferencesEditor()">Customize Monitoring ⚙️</button>
@@ -877,70 +888,105 @@
       <div class="dash-panel hidden" id="panel-billing">
         <div class="dash-header" style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
           <div>
-            <h1>Subscription & Billing</h1>
-            <p>Manage your Sharflow subscription, plan features, and billing via Paddle.</p>
+            <h2>Subscription &amp; Plans</h2>
+            <p>Manage your Sharflow subscription, plan features, and billing via our payment partner (Merchant of Record).</p>
           </div>
           <div id="billing-status-chip">
-            <span class="badge-pill badge-neutral" id="dash-plan-badge" style="font-size:12px;padding:4px 12px;">Current Plan: Starter</span>
+            <span class="badge-pill badge-neutral" id="dash-plan-badge" style="font-size:12px;padding:4px 12px;">Current Plan: Free Trial</span>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));gap:24px;margin-top:20px;">
-          <!-- Active Plan Details -->
-          <div class="dash-card">
-            <div class="dash-card-head">
-              <h3>Current Plan Overview</h3>
+        <!-- Current Status Overview Card -->
+        <div class="dash-card" style="margin-top:20px;margin-bottom:28px;">
+          <div class="dash-card-head">
+            <h3>Current Subscription Status</h3>
+          </div>
+          <div style="padding:16px 0;">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
+              <div style="font-size:28px;">⚡</div>
+              <div>
+                <h4 style="margin:0;font-size:18px;" id="current-plan-title">Free Trial Active</h4>
+                <p style="margin:2px 0 0;font-size:13px;color:var(--muted);" id="current-plan-desc">14-day free trial with full Complete access. No credit card required.</p>
+              </div>
             </div>
-            <div style="padding:16px 0;">
-              <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">
-                <div style="font-size:28px;">⚡</div>
-                <div>
-                  <h4 style="margin:0;font-size:18px;" id="current-plan-title">Sharflow Starter</h4>
-                  <p style="margin:2px 0 0;font-size:13px;color:var(--muted);" id="current-plan-desc">Free early access plan with baseline website checks.</p>
-                </div>
+            <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:8px;">
+                <span style="color:var(--muted);">Status:</span>
+                <strong id="billing-plan-status" style="color:var(--green);">14 days remaining</strong>
               </div>
-              <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;margin-bottom:16px;">
-                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:8px;">
-                  <span style="color:var(--muted);">Billing Status:</span>
-                  <strong id="billing-plan-status" style="color:var(--green);">Active (Free)</strong>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:8px;">
-                  <span style="color:var(--muted);">Target Price ID:</span>
-                  <code style="font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;border:1px solid var(--border);" id="active-price-id-label">pri_01m4tf8w6602rpfrhv9mbrcm7b</code>
-                </div>
-                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;">
-                  <span style="color:var(--muted);">Payment Gateway:</span>
-                  <span style="font-weight:600;">Paddle Billing v2</span>
-                </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:8px;">
+                <span style="color:var(--muted);">Billing Partner:</span>
+                <span style="font-weight:600;">Merchant of Record</span>
               </div>
-              <div id="plan-action-container">
-                <button class="btn btn-primary btn-block" id="btn-dashboard-upgrade-pro" onclick="checkoutSharflowPro()">
-                  Upgrade to Sharflow Pro ($29/mo) →
-                </button>
+              <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px;" hidden id="active-price-id-container">
+                <span style="color:var(--muted);">Target Price ID:</span>
+                <code style="font-size:12px;background:var(--surface);padding:2px 6px;border-radius:4px;border:1px solid var(--border);" id="active-price-id-label" hidden>pri_01m4tf8w6602rpfrhv9mbrcm7b</code>
               </div>
+            </div>
+            <div id="plan-action-container">
+              <!-- Dynamically populated by updateBillingPanelUI() -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Available Plans Grid -->
+        <div style="margin-bottom:16px;">
+          <h3 style="margin:0 0 6px;font-size:16px;">Available Plans</h3>
+          <p style="margin:0 0 16px;font-size:13px;color:var(--muted);">Choose the plan that fits your website's monitoring needs. All plans include daily email reports.</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(300px, 1fr));gap:24px;">
+          <!-- Analytics Plan Card -->
+          <div class="dash-card" id="plan-card-analytics">
+            <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;">
+              <h3 style="margin:0;">Analytics</h3>
+              <span class="badge-pill badge-neutral" style="font-size:11px;">$9/mo</span>
+            </div>
+            <p style="font-size:13px;color:var(--muted);margin:8px 0 16px;">
+              Daily automated performance &amp; shopper funnel monitoring for Google Analytics 4.
+            </p>
+            <div style="font-size:26px;font-weight:700;color:var(--text);margin-bottom:16px;">$9 <span style="font-size:13px;font-weight:500;color:var(--muted);">/ month</span></div>
+            <ul style="list-style:none;padding:0;margin:0 0 20px;font-size:13px;display:flex;flex-direction:column;gap:10px;">
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> Daily email report &amp; store digest</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> GA4 traffic, sessions, &amp; engagement rates</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> E-commerce funnel (add to cart, checkout, revenue)</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> AI referral traffic (ChatGPT, Perplexity, Claude)</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> Rule-based noise floor detection</li>
+            </ul>
+            <div id="plan-cta-analytics">
+              <button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">
+                Select Analytics Plan ($9/mo)
+              </button>
             </div>
           </div>
 
-          <!-- Sharflow Pro Features -->
-          <div class="dash-card" style="border:1.5px solid var(--accent);">
+          <!-- Complete Plan Card -->
+          <div class="dash-card" id="plan-card-complete" style="border:1.5px solid var(--accent);">
             <div class="dash-card-head" style="display:flex;justify-content:space-between;align-items:center;">
-              <h3 style="color:var(--accent);margin:0;">Sharflow Pro Benefits</h3>
-              <span class="badge-pill badge-neutral" style="font-size:11px;background:var(--accent-soft);color:var(--accent);border-color:var(--accent);">pri_01m4tf8w6602rpfrhv9mbrcm7b</span>
+              <h3 style="color:var(--accent);margin:0;">Complete</h3>
+              <span class="badge-pill" style="font-size:11px;background:var(--accent);color:#fff;">Recommended</span>
             </div>
-            <p style="font-size:13px;color:var(--muted);margin:10px 0 16px;">
-              Designed for website owners who need automated vigilance and instant detection of organic or revenue drops.
+            <p style="font-size:13px;color:var(--muted);margin:8px 0 16px;">
+              Everything in Analytics plus Google Search Console, Bing Webmaster, and weekly URL Inspection.
             </p>
+            <div style="font-size:26px;font-weight:700;color:var(--text);margin-bottom:16px;">$19 <span style="font-size:13px;font-weight:500;color:var(--muted);">/ month</span></div>
             <ul style="list-style:none;padding:0;margin:0 0 20px;font-size:13px;display:flex;flex-direction:column;gap:10px;">
-              <li style="display:flex;gap:8px;align-items:center;"><span>🛡️</span> <strong>24/7 Automated Watchdog Checks</strong></li>
-              <li style="display:flex;gap:8px;align-items:center;"><span>📊</span> <strong>GA4 E-commerce & Checkout Drop-off Tracking</strong></li>
-              <li style="display:flex;gap:8px;align-items:center;"><span>🔍</span> <strong>Bing Webmaster & Copilot Search Indexing</strong></li>
-              <li style="display:flex;gap:8px;align-items:center;"><span>⚡</span> <strong>Instant Priority Email Alerts</strong></li>
-              <li style="display:flex;gap:8px;align-items:center;"><span>🎯</span> <strong>Key Landing & Pricing Page Anomaly Triggers</strong></li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> <strong>Everything in Analytics</strong></li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> Google Search Console (clicks, impressions, position, queries)</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> Weekly URL Inspection (indexing &amp; mobile usability)</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> Bing Webmaster crawl issues &amp; search performance</li>
+              <li style="display:flex;gap:8px;align-items:flex-start;"><span>✓</span> On-demand audits &amp; CSV export</li>
             </ul>
-            <div style="background:var(--surface-2);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--muted);text-align:center;">
-              Checkout is processed securely by Paddle. Subscriptions can be paused or cancelled at any time.
+            <div id="plan-cta-complete">
+              <button class="btn btn-primary btn-block" onclick="startCheckout('complete')">
+                Select Complete Plan ($19/mo)
+              </button>
             </div>
           </div>
+        </div>
+
+        <div style="background:var(--surface-2);border-radius:6px;padding:12px;font-size:12px;color:var(--muted);text-align:center;margin-top:20px;">
+          Checkout is processed securely by our payment partner (Merchant of Record). Subscriptions are billed monthly and can be cancelled at any time.
         </div>
       </div>
     </main>

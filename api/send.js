@@ -13,6 +13,8 @@
 
 const RESEND_URL = "https://api.resend.com/emails";
 const { normalizeMonitoringPreferences, matchesUserPreferences } = require("./_lib/preferences");
+const { getDb } = require("./_lib/db");
+const { getEntitlements } = require("./_lib/plans");
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -122,10 +124,11 @@ function getWatchdogEmailSubject(report = {}) {
 }
 
 // ── WATCHDOG INTELLIGENCE REPORT EMAIL TEMPLATE (E-COMMERCE BRIEFING) ─────────
-function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
+function watchdogReportHtml({ name, report = {}, dateStr = "", entitlements = null }) {
   const firstName = name ? name.split(" ")[0] : "there";
   const displayDate = dateStr || report.targetDate || new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   const websiteUrl = report.websiteUrl || "Your Online Store";
+  const userEntitlements = entitlements || report.entitlements || null;
 
   const status = report.status || report.intelligence?.status || "stable";
   const monitoringStatus = report.monitoringStatus || (
@@ -342,9 +345,15 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
 
   function formatProviderStatus(source, provName) {
     if (!source) return "Not connected";
+    if (source.status === "not_in_plan" || source.reason === "Not included in your plan" || source.text === "Not included in your plan") {
+      return "Not included in your plan";
+    }
     const provSummary = report.fetchSummary?.providers?.find(p => p.provider === provName) ||
                         report.dataFetchSummary?.providers?.find(p => p.provider === provName);
     if (provSummary) {
+      if (provSummary.status === "not_in_plan" || provSummary.reason === "Not included in your plan") {
+        return "Not included in your plan";
+      }
       if (provSummary.status === "error" || provSummary.error) {
         return `Connection error · ${escapeHtml(provSummary.error || "Sync failed")}`;
       }
@@ -356,6 +365,13 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
       }
     }
     return "Connected & Synced ✓";
+  }
+
+  let trialFooterHtml = "";
+  if (userEntitlements?.status === "trial" && userEntitlements?.trialEndsAt) {
+    const daysLeft = userEntitlements.trialDaysLeft ?? 0;
+    const trialDateStr = new Date(userEntitlements.trialEndsAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    trialFooterHtml = `<p style="margin-top:6px;color:#2563EB;font-weight:600;">Your free trial ends on ${trialDateStr} (${daysLeft} days left).</p>`;
   }
 
   return `<!DOCTYPE html>
@@ -488,6 +504,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
     <div class="footer">
       <p>Sharflow — E-Commerce Intelligence</p>
       <p style="margin-top:4px;">You run your store. Sharflow watches what shoppers do.</p>
+      ${trialFooterHtml}
     </div>
   </div>
 </div>
@@ -503,7 +520,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "" }) {
  * @param {object} params.report
  * @returns {Promise<object>}
  */
-async function sendWatchdogEmail({ toEmail, userName = "", report = {} }) {
+async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlements = null }) {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
   const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
 
@@ -514,8 +531,19 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {} }) {
     throw new Error("toEmail is required.");
   }
 
+  let resolvedEntitlements = entitlements || report.entitlements || null;
+  if (!resolvedEntitlements && toEmail) {
+    try {
+      const db = await getDb();
+      const user = await db.collection("users").findOne({ email: toEmail.toLowerCase() });
+      if (user) {
+        resolvedEntitlements = getEntitlements(user);
+      }
+    } catch (_) {}
+  }
+
   const subject = getWatchdogEmailSubject(report);
-  const html = watchdogReportHtml({ name: userName, report });
+  const html = watchdogReportHtml({ name: userName, report, entitlements: resolvedEntitlements });
 
   const res = await fetch(RESEND_URL, {
     method: "POST",
@@ -577,10 +605,28 @@ async function handler(req, res) {
 
     // ── WATCHDOG INTELLIGENCE REPORT ─────────────────────────────────────────
     } else if (action === "watchdog_report" || action === "digest") {
+      let entitlements = null;
+      try {
+        const db = await getDb();
+        const user = await db.collection("users").findOne({ email: toEmail.toLowerCase() });
+        if (user) {
+          entitlements = getEntitlements(user);
+        }
+      } catch (dbErr) {
+        console.warn("[api/send] db entitlements check warning:", dbErr.message);
+      }
+
+      if (entitlements && entitlements.enforced && entitlements.status === "expired") {
+        return res.status(403).json({
+          error: "plan_required",
+          message: "Your free trial has ended. Choose a plan to continue.",
+        });
+      }
+
       const name = body.name || "";
       const report = body.report || {};
       subject = getWatchdogEmailSubject(report);
-      html = watchdogReportHtml({ name, report });
+      html = watchdogReportHtml({ name, report, entitlements });
 
     } else {
       return res.status(400).json({ error: "Unknown action. Use 'welcome' or 'watchdog_report'." });

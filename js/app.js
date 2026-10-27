@@ -13,7 +13,15 @@ const STORAGE = {
   lastDigestDate: "signal_last_digest_date",
   lastWatchdogReport: "signal_last_watchdog_report",
   emailDigest: "signal_email_digest_on",
+  entitlements: "signal_entitlements",
 };
+
+const PLAN_CONFIG = {
+  analytics: { key: "analytics", name: "Analytics", priceUsdMonthly: 9 },
+  complete: { key: "complete", name: "Complete", priceUsdMonthly: 19 },
+};
+
+let currentUserEntitlements = null;
 
 const LEGACY_LOCK = "digest_locked";
 const LEGACY_ANSWERS = "digest_answers";
@@ -71,8 +79,18 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-function applyUserToLocalState(user) {
+function applyUserToLocalState(user, entitlements = null) {
   if (!user) return;
+  const resolvedEntitlements = entitlements || user.entitlements || null;
+  if (resolvedEntitlements) {
+    currentUserEntitlements = resolvedEntitlements;
+    try {
+      localStorage.setItem(STORAGE.entitlements, JSON.stringify(resolvedEntitlements));
+    } catch {}
+    if (typeof updateOverviewTrialBanner === "function") {
+      updateOverviewTrialBanner(resolvedEntitlements);
+    }
+  }
   if (user.name && user.name.trim()) {
     localStorage.setItem(STORAGE.userName, user.name.trim());
     const form = getSavedForm();
@@ -141,7 +159,7 @@ async function hydrateSession() {
       return false;
     }
     const data = await res.json();
-    applyUserToLocalState(data.user);
+    applyUserToLocalState(data.user, data.entitlements);
     return routeAfterAuth(data.user);
   } catch {
     return false;
@@ -320,63 +338,209 @@ async function openPaddleCheckout(priceIdOverride) {
   }
 }
 
+function getUserEntitlements() {
+  if (currentUserEntitlements) return currentUserEntitlements;
+  try {
+    const raw = localStorage.getItem(STORAGE.entitlements);
+    if (raw) {
+      currentUserEntitlements = JSON.parse(raw);
+      return currentUserEntitlements;
+    }
+  } catch {}
+  return null;
+}
+
+function updateOverviewTrialBanner(entitlementsInput) {
+  const ent = entitlementsInput || getUserEntitlements();
+  const banner = document.getElementById("dash-trial-banner");
+  const title = document.getElementById("dash-trial-banner-title");
+  const desc = document.getElementById("dash-trial-banner-desc");
+  if (!banner) return;
+
+  if (!ent || ent.status === "admin" || ent.status === "active") {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  if (ent.status === "trial") {
+    banner.classList.remove("hidden");
+    banner.style.background = "#EFF6FF";
+    banner.style.borderColor = "#BFDBFE";
+    const days = ent.trialDaysLeft ?? 0;
+    if (title) {
+      title.textContent = `Free Trial: ${days} day${days === 1 ? "" : "s"} left`;
+      title.style.color = "#1D4ED8";
+    }
+    if (desc) {
+      desc.textContent = "You have full Complete access to all features during your 14-day trial.";
+      desc.style.color = "#3B82F6";
+    }
+    return;
+  }
+
+  if (ent.status === "expired") {
+    banner.classList.remove("hidden");
+    banner.style.background = "#FEF2F2";
+    banner.style.borderColor = "#FECACA";
+    if (title) {
+      title.textContent = "Free Trial Ended · Choose a Plan";
+      title.style.color = "#DC2626";
+    }
+    if (desc) {
+      desc.textContent = "Your 14-day free trial has completed. Choose a plan below to keep daily monitoring active.";
+      desc.style.color = "#B91C1C";
+    }
+    return;
+  }
+
+  banner.classList.add("hidden");
+}
+
+function startCheckout(planKey) {
+  const normKey = planKey === "complete" ? "complete" : "analytics";
+  // Friendly notice as fallback if price ID is not configured
+  toast("Billing opens shortly. We'll email you before your trial ends.");
+}
+
 function checkoutSharflowPro() {
-  openPaddleCheckout(SHARFLOW_PRO_PRICE_ID);
+  startCheckout("complete");
 }
 
 function updateBillingPanelUI() {
-  const currentPlan = (localStorage.getItem(STORAGE.plan) || "starter").toLowerCase();
-  const isPro = currentPlan === "pro" || currentPlan === "sharflow_pro";
-
+  const ent = getUserEntitlements();
   const badge = document.getElementById("dash-plan-badge");
   const title = document.getElementById("current-plan-title");
   const desc = document.getElementById("current-plan-desc");
   const status = document.getElementById("billing-plan-status");
   const actionContainer = document.getElementById("plan-action-container");
 
-  if (badge) {
-    badge.textContent = isPro ? "Current Plan: Sharflow Pro" : "Current Plan: Starter";
-    badge.className = "badge-pill badge-neutral";
-    if (isPro) {
+  const analyticsCta = document.getElementById("plan-cta-analytics");
+  const completeCta = document.getElementById("plan-cta-complete");
+
+  const statusType = ent?.status || "trial";
+  const planKey = ent?.planKey;
+  const daysLeft = ent?.trialDaysLeft ?? 0;
+
+  if (statusType === "admin") {
+    if (badge) {
+      badge.textContent = "Administrator";
+      badge.className = "badge-pill";
+      badge.style.background = "#F3E8FF";
+      badge.style.color = "#7E22CE";
+      badge.style.borderColor = "#D8B4FE";
+    }
+    if (title) title.textContent = "Admin Access Active";
+    if (desc) desc.textContent = "Full administrative access with all monitoring sources enabled.";
+    if (status) {
+      status.textContent = "Active (Admin Mode)";
+      status.style.color = "var(--green)";
+    }
+    if (actionContainer) {
+      actionContainer.innerHTML = `<div style="background:#F3E8FF;border:1px solid #D8B4FE;border-radius:6px;padding:12px;text-align:center;color:#7E22CE;font-weight:600;font-size:14px;">✓ Admin bypass active — all monitoring and sources enabled</div>`;
+    }
+    return;
+  }
+
+  if (statusType === "active") {
+    const isComplete = planKey === "complete" || planKey === "pro" || planKey === "sharflow_pro";
+    const planName = isComplete ? "Complete" : "Analytics";
+    const priceStr = isComplete ? "$19/mo" : "$9/mo";
+
+    if (badge) {
+      badge.textContent = `Current Plan: ${planName}`;
+      badge.className = "badge-pill";
       badge.style.background = "var(--green-soft)";
       badge.style.color = "var(--green)";
       badge.style.borderColor = "#A7F3D0";
-    } else {
-      badge.style.background = "";
-      badge.style.color = "";
-      badge.style.borderColor = "";
     }
-  }
-
-  if (title) {
-    title.textContent = isPro ? "Sharflow Pro Active" : "Sharflow Starter";
-  }
-
-  if (desc) {
-    desc.textContent = isPro
-      ? "Continuous 24/7 Watchdog monitoring, deep GA4 e-commerce tracking, and priority alerts are enabled."
-      : "Free early access plan with baseline website checks.";
-  }
-
-  if (status) {
-    status.textContent = isPro ? "Active Pro Subscriber" : "Active (Free)";
-    status.style.color = "var(--green)";
-  }
-
-  if (actionContainer) {
-    if (isPro) {
+    if (title) title.textContent = `${planName} Plan Active`;
+    if (desc) {
+      desc.textContent = isComplete
+        ? "All data sources (GA4, GSC, Bing) and weekly URL Inspection are enabled."
+        : "Daily Google Analytics 4 traffic and e-commerce tracking enabled.";
+    }
+    if (status) {
+      status.textContent = `Active (${priceStr})`;
+      status.style.color = "var(--green)";
+    }
+    if (actionContainer) {
       actionContainer.innerHTML = `
         <div style="background:var(--green-soft);border:1px solid #A7F3D0;border-radius:6px;padding:12px;text-align:center;color:var(--green);font-weight:600;font-size:14px;">
-          ✓ You are currently subscribed to Sharflow Pro
+          ✓ Subscribed to ${planName} (${priceStr})
         </div>
       `;
-    } else {
+    }
+    if (analyticsCta) {
+      analyticsCta.innerHTML = !isComplete
+        ? `<div style="background:var(--green-soft);color:var(--green);font-weight:600;font-size:13px;padding:8px 12px;border-radius:6px;text-align:center;">Current Plan ✓</div>`
+        : `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Switch to Analytics ($9/mo)</button>`;
+    }
+    if (completeCta) {
+      completeCta.innerHTML = isComplete
+        ? `<div style="background:var(--green-soft);color:var(--green);font-weight:600;font-size:13px;padding:8px 12px;border-radius:6px;text-align:center;">Current Plan ✓</div>`
+        : `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Upgrade to Complete ($19/mo)</button>`;
+    }
+    return;
+  }
+
+  if (statusType === "trial") {
+    if (badge) {
+      badge.textContent = `14-Day Free Trial (${daysLeft}d left)`;
+      badge.className = "badge-pill badge-neutral";
+      badge.style.background = "#EFF6FF";
+      badge.style.color = "#1D4ED8";
+      badge.style.borderColor = "#BFDBFE";
+    }
+    if (title) title.textContent = "Free Trial Active (Complete Access)";
+    if (desc) {
+      desc.textContent = `You have full access to all data sources and weekly technical checks during your 14-day trial (${daysLeft} days remaining).`;
+    }
+    if (status) {
+      status.textContent = `${daysLeft} days remaining`;
+      status.style.color = "#1D4ED8";
+    }
+    if (actionContainer) {
       actionContainer.innerHTML = `
-        <button class="btn btn-primary btn-block" id="btn-dashboard-upgrade-pro" onclick="checkoutSharflowPro()">
-          Upgrade to Sharflow Pro ($29/mo) →
-        </button>
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:6px;padding:12px;text-align:center;color:#1D4ED8;font-size:13px;line-height:1.5;">
+          Enjoying Sharflow? Choose a plan below to keep monitoring uninterrupted after your trial.
+        </div>
       `;
     }
+    if (analyticsCta) {
+      analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Select Analytics ($9/mo)</button>`;
+    }
+    if (completeCta) {
+      completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Select Complete ($19/mo)</button>`;
+    }
+    return;
+  }
+
+  // Expired
+  if (badge) {
+    badge.textContent = "Trial Expired";
+    badge.className = "badge-pill";
+    badge.style.background = "#FEF2F2";
+    badge.style.color = "#DC2626";
+    badge.style.borderColor = "#FECACA";
+  }
+  if (title) title.textContent = "Your 14-day trial has ended";
+  if (desc) desc.textContent = "Automated daily monitoring and on-demand audits are paused. Choose a plan below to resume.";
+  if (status) {
+    status.textContent = "Trial Expired";
+    status.style.color = "#DC2626";
+  }
+  if (actionContainer) {
+    actionContainer.innerHTML = `
+      <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:12px;text-align:center;color:#DC2626;font-size:13px;line-height:1.5;">
+        Select either Analytics ($9/mo) or Complete ($19/mo) below to reactivate daily monitoring.
+      </div>
+    `;
+  }
+  if (analyticsCta) {
+    analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Choose Analytics ($9/mo)</button>`;
+  }
+  if (completeCta) {
+    completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Choose Complete ($19/mo)</button>`;
   }
 }
 
@@ -2194,6 +2358,19 @@ async function generateDashboardDigest(auto = false) {
     });
 
     const data = await res.json().catch(() => ({}));
+    if (res.status === 403 && data.error === "plan_required") {
+      toast("Your free trial has ended. Choose a plan to continue.");
+      el.className = "digest-content empty";
+      el.innerHTML = `
+        <div style="padding:16px 4px;">
+          <p style="margin:0 0 6px;font-weight:600;color:#DC2626;font-size:14px;">Trial Expired</p>
+          <p style="margin:0 0 14px;color:var(--muted);font-size:13px;line-height:1.5;">Your 14-day free trial has completed. Choose a plan to continue running automated daily checks.</p>
+          <button class="btn btn-primary btn-sm" onclick="dashNav('billing')">View Plans &amp; Pricing →</button>
+        </div>
+      `;
+      dashNav("billing");
+      return;
+    }
     if (!res.ok || !data.ok || !data.report) {
       const errorMsg = data?.error || (typeof data === "string" ? data : "");
       throw new Error(errorMsg || "Failed to generate report");
@@ -2254,7 +2431,12 @@ async function sendDigestEmail() {
         report,
       }),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 403 && data.error === "plan_required") {
+      toast("Your free trial has ended. Choose a plan to continue.");
+      dashNav("billing");
+      return;
+    }
     if (!res.ok) throw new Error(data.error || "Send failed");
     toast("Watchdog report emailed to " + savedEmail);
   } catch (e) {
@@ -2889,16 +3071,43 @@ function renderDataSourceCard(provider, info, prefix) {
     if (btnChange) btnChange.style.display = "inline-block";
     if (btnDisconnect) btnDisconnect.style.display = "inline-block";
   } else {
-    if (badge) {
-      badge.textContent = "Not connected";
-      badge.style.background = "#FEF3C7";
-      badge.style.color = "#92400E";
-      badge.style.borderColor = "#FDE68A";
+    const ent = getUserEntitlements();
+    const isEnforced = ent?.enforced;
+    const isExcludedFromPlan = isEnforced && ent?.allowedProviders && !ent.allowedProviders.includes(provider) && ent?.status !== "trial" && ent?.status !== "admin";
+
+    if (isExcludedFromPlan) {
+      if (badge) {
+        badge.textContent = "Included in Complete plan";
+        badge.style.background = "#EFF6FF";
+        badge.style.color = "#1D4ED8";
+        badge.style.borderColor = "#BFDBFE";
+      }
+      if (connInfo) connInfo.style.display = "none";
+      if (btnConnect) {
+        btnConnect.textContent = "Included in the Complete plan →";
+        btnConnect.className = "btn btn-secondary btn-sm";
+        btnConnect.onclick = () => dashNav("billing");
+        btnConnect.style.display = "inline-block";
+      }
+      if (btnChange) btnChange.style.display = "none";
+      if (btnDisconnect) btnDisconnect.style.display = "none";
+    } else {
+      if (badge) {
+        badge.textContent = "Not connected";
+        badge.style.background = "#FEF3C7";
+        badge.style.color = "#92400E";
+        badge.style.borderColor = "#FDE68A";
+      }
+      if (connInfo) connInfo.style.display = "none";
+      if (btnConnect) {
+        btnConnect.textContent = prefix === "gsc" ? "Connect Search Console →" : "Connect Bing →";
+        btnConnect.className = "btn btn-primary btn-sm";
+        btnConnect.onclick = () => initiateOAuth(provider);
+        btnConnect.style.display = "inline-block";
+      }
+      if (btnChange) btnChange.style.display = "none";
+      if (btnDisconnect) btnDisconnect.style.display = "none";
     }
-    if (connInfo) connInfo.style.display = "none";
-    if (btnConnect) btnConnect.style.display = "inline-block";
-    if (btnChange) btnChange.style.display = "none";
-    if (btnDisconnect) btnDisconnect.style.display = "none";
   }
 }
 
@@ -3259,7 +3468,9 @@ window.toggleProfilePreferencesEditor = toggleProfilePreferencesEditor;
 window.renderProfilePreferencesEditor = renderProfilePreferencesEditor;
 window.saveProfilePreferences = saveProfilePreferences;
 window.openPaddleCheckout = openPaddleCheckout;
+window.startCheckout = startCheckout;
 window.checkoutSharflowPro = checkoutSharflowPro;
 window.updateBillingPanelUI = updateBillingPanelUI;
+window.updateOverviewTrialBanner = updateOverviewTrialBanner;
 window.refreshUserPlanFromServer = refreshUserPlanFromServer;
 window.SHARFLOW_PRO_PRICE_ID = SHARFLOW_PRO_PRICE_ID;

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pricing Plans · Sharflow — AI Website Watchdog</title>
+  <meta name="description" content="Simple, transparent plans for automated website monitoring. 14-day free trial with full access, no credit card required. Plans start at $9/mo." />
+  <link rel="canonical" href="https://sharflow.online/pricing" />
+
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://sharflow.online/pricing" />
+  <meta property="og:title" content="Pricing Plans · Sharflow — AI Website Watchdog" />
+  <meta property="og:description" content="Simple, transparent plans for automated website monitoring. 14-day free trial with full access, no credit card required. Plans start at $9/mo." />
+  <meta property="og:image" content="https://sharflow.online/assets/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Sharflow Pricing — AI Website Watchdog" />
+  <meta property="og:site_name" content="Sharflow" />
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:url" content="https://sharflow.online/pricing" />
+  <meta name="twitter:title" content="Pricing Plans · Sharflow — AI Website Watchdog" />
+  <meta name="twitter:description" content="Simple, transparent plans for automated website monitoring. 14-day free trial with full access, no credit card required. Plans start at $9/mo." />
+  <meta name="twitter:image" content="https://sharflow.online/assets/og-image.png" />
+  <meta name="twitter:image:alt" content="Sharflow Pricing — AI Website Watchdog" />
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png" />
+  <link rel="shortcut icon" href="/favicon.ico" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/app.css" />
+  <style>
+    .pricing-page-wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+    .pricing-header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .pricing-title {
+      font-family: var(--serif);
+      font-size: clamp(2.4rem, 5vw, 3.4rem);
+      font-weight: 400;
+      color: var(--text);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      margin: 12px 0 10px;
+    }
+    .pricing-sub {
+      font-size: 16px;
+      color: var(--muted);
+      max-width: 620px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+    .trial-pill {
+      display: inline-block;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      padding: 5px 14px;
+      border-radius: 100px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      box-shadow: var(--shadow-sm);
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      margin-bottom: 56px;
+    }
+    .pricing-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 32px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+    }
+    .pricing-card.featured {
+      border: 2px solid var(--accent);
+      box-shadow: var(--shadow-md);
+    }
+    .pricing-badge {
+      position: absolute;
+      top: -12px;
+      right: 24px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 100px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .plan-tag {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+    .plan-tag.featured-tag {
+      color: var(--accent);
+    }
+    .plan-name {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 8px;
+    }
+    .plan-desc {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.55;
+      margin: 0 0 24px;
+      min-height: 44px;
+    }
+    .plan-price {
+      font-size: 38px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 24px;
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+    .plan-price span {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .plan-features {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 32px;
+      font-size: 14px;
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      gap: 13px;
+      flex: 1;
+    }
+    .plan-features li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      line-height: 1.5;
+    }
+    .plan-features li span {
+      color: var(--accent);
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .pricing-notes {
+      text-align: center;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 20px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-bottom: 56px;
+    }
+    .faq-wrap {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .faq-title {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .faq-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 20px 24px;
+      margin-bottom: 16px;
+    }
+    .faq-q {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .faq-a {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.65;
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <nav class="nav">
+    <a href="/" class="nav-brand" style="text-decoration:none;">
+      <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="34" height="40" class="brand-mark" />
+      <span class="nav-logo">Sharflow<em>.</em></span>
+    </a>
+    <div class="nav-actions" style="display:flex;align-items:center;gap:10px;">
+      <a href="/pricing" class="btn btn-ghost" style="text-decoration:none;font-weight:600;padding:8px 14px;font-size:13px;color:var(--text);">Pricing</a>
+      <a href="/about" class="btn btn-ghost" style="text-decoration:none;padding:8px 14px;font-size:13px;">About</a>
+      <a href="/contact" class="btn btn-ghost" style="text-decoration:none;padding:8px 14px;font-size:13px;">Contact</a>
+      <a href="/?signup=1" class="btn btn-primary" style="text-decoration:none;padding:8px 16px;font-size:13px;">Start free trial</a>
+    </div>
+  </nav>
+
+  <main class="pricing-page-wrap">
+    <header class="pricing-header">
+      <div class="trial-pill">14-Day Free Trial · Full Access · No Credit Card</div>
+      <h1 class="pricing-title">Simple, honest pricing</h1>
+      <p class="pricing-sub">
+        Automated daily website checks that alert you when something important shifts. Try either plan free for 14 days.
+      </p>
+    </header>
+
+    <div class="pricing-grid">
+      <!-- Analytics Plan -->
+      <div class="pricing-card">
+        <div class="plan-tag">Google Analytics Only</div>
+        <h2 class="plan-name">Analytics</h2>
+        <p class="plan-desc">Daily automated performance and shopper funnel monitoring for Google Analytics 4.</p>
+        <div class="plan-price">$9 <span>/ month</span></div>
+        <ul class="plan-features">
+          <li><span>✓</span> <strong>Daily email report</strong> with traffic &amp; conversion trends</li>
+          <li><span>✓</span> <strong>GA4 traffic &amp; engagement:</strong> sessions, users, bounce/engagement rate</li>
+          <li><span>✓</span> <strong>Traffic source attribution:</strong> top channels &amp; landing pages</li>
+          <li><span>✓</span> <strong>E-commerce funnel tracking:</strong> add to cart, checkout start, purchase, revenue</li>
+          <li><span>✓</span> <strong>AI referral traffic detection:</strong> ChatGPT, Perplexity, Claude</li>
+          <li><span>✓</span> <strong>Rule-based anomaly detection</strong> with noise floors</li>
+          <li><span>✓</span> <strong>Dashboard tools:</strong> Check my website now, CSV export</li>
+        </ul>
+        <a href="/?signup=1" class="btn btn-secondary btn-block" style="text-decoration:none;text-align:center;">Start 14-day free trial</a>
+      </div>
+
+      <!-- Complete Plan -->
+      <div class="pricing-card featured">
+        <div class="pricing-badge">Recommended</div>
+        <div class="plan-tag featured-tag">All Data Sources</div>
+        <h2 class="plan-name">Complete</h2>
+        <p class="plan-desc">Comprehensive daily monitoring across Google Analytics, Search Console, and Bing Webmaster.</p>
+        <div class="plan-price">$19 <span>/ month</span></div>
+        <ul class="plan-features">
+          <li><span>✓</span> <strong>Everything in Analytics</strong></li>
+          <li><span>✓</span> <strong>Google Search Console:</strong> clicks, impressions, CTR, average position, top pages &amp; queries</li>
+          <li><span>✓</span> <strong>Weekly URL Inspection:</strong> indexing status &amp; mobile usability on up to 10 URLs</li>
+          <li><span>✓</span> <strong>Bing Webmaster:</strong> crawl issues &amp; search performance</li>
+          <li><span>✓</span> <strong>Multi-source correlation:</strong> cross-checks traffic shifts against search visibility</li>
+          <li><span>✓</span> <strong>Full dashboard access:</strong> Check my website now, CSV export, Email report</li>
+        </ul>
+        <a href="/?signup=1" class="btn btn-primary btn-block" style="text-decoration:none;text-align:center;">Start 14-day free trial →</a>
+      </div>
+    </div>
+
+    <div class="pricing-notes">
+      <strong>Transparent billing:</strong> All subscriptions are billed monthly with no long-term contracts. You can cancel at any time directly through your invoice receipt or by contacting support. Checkout is processed securely by our payment partner (Merchant of Record).
+    </div>
+
+    <!-- FAQ Section -->
+    <section class="faq-wrap">
+      <h2 class="faq-title">Frequently Asked Questions</h2>
+
+      <div class="faq-item">
+        <div class="faq-q">How does the 14-day free trial work?</div>
+        <p class="faq-a">
+          Every new account starts with a 14-day free trial with full Complete access. No credit card is required to sign up. You can connect your data sources immediately and receive daily reports. When your trial ends, simply choose either Analytics ($9/mo) or Complete ($19/mo) to keep monitoring active.
+        </p>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">How frequently does monitoring run?</div>
+        <p class="faq-a">
+          Monitoring runs once per day via an automated daily schedule (at 13:00 UTC) and sends one consolidated email briefing per day. You can also run an on-demand audit anytime from your dashboard using "Check my website now".
+        </p>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">How does anomaly detection work?</div>
+        <p class="faq-a">
+          Detection is rule-based with configured noise floors to avoid alert fatigue. Sharflow requires at least 2 daily snapshots before comparisons begin. AI is used solely to summarize and explain findings into plain English hypotheses; possible causes are always presented as hypotheses for you to investigate.
+        </p>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Can I cancel anytime?</div>
+        <p class="faq-a">
+          Yes. There are no lock-in contracts or cancellation penalties. You can cancel recurring billing at any time by emailing hello@sharflow.online or through the buyer portal provided by our payment partner (Merchant of Record). Your access remains active until the end of your current paid billing period.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Consistent Footer -->
+  <footer>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="/assets/sharflow-mark.png" alt="Sharflow logo" width="24" height="28" style="height:26px;width:auto;display:block;" />
+        <strong style="font-size:15px;color:var(--text);">Sharflow</strong>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin:0;">You run your business. Sharflow watches your website.</p>
+    </div>
+    <p style="margin:0;font-size:12px;color:var(--dim);">
+      <a href="/pricing" style="color:var(--text);font-weight:600;font-size:12px;text-decoration:none;">Pricing</a> · 
+      <a href="/about" style="color:var(--muted);font-size:12px;text-decoration:none;">About</a> · 
+      <a href="/contact" style="color:var(--muted);font-size:12px;text-decoration:none;">Contact</a> · 
+      <a href="/privacy" style="color:var(--muted);font-size:12px;text-decoration:none;">Privacy Policy</a> · 
+      <a href="/terms" style="color:var(--muted);font-size:12px;text-decoration:none;">Terms of Service</a> · 
+      <a href="/refund" style="color:var(--muted);font-size:12px;text-decoration:none;">Refund Policy</a> · 
+      © 2026 Sharflow
+    </p>
+  </footer>
+
+</body>
+</html>

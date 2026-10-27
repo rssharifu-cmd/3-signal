@@ -3,6 +3,21 @@
   "outputDirectory": ".",
   "headers": [
     {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "X-Frame-Options", "value": "SAMEORIGIN" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400" }
+      ]
+    },
+    {
       "source": "/",
       "headers": [
         { "key": "Cross-Origin-Opener-Policy", "value": "same-origin-allow-popups" }
@@ -30,6 +45,8 @@
     { "source": "/privacy/", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },
     { "source": "/terms/", "destination": "/terms.html" },
+    { "source": "/pricing", "destination": "/pricing.html" },
+    { "source": "/pricing/", "destination": "/pricing.html" },
     { "source": "/refund", "destination": "/refund.html" },
     { "source": "/refund/", "destination": "/refund.html" },
     { "source": "/about", "destination": "/about.html" },
@@ -38,7 +55,6 @@
     { "source": "/contact/", "destination": "/contact.html" },
     { "source": "/robots.txt", "destination": "/robots.txt" },
     { "source": "/sitemap.xml", "destination": "/sitemap.xml" },
-    { "source": "/", "has": [{ "type": "query", "key": "code" }], "destination": "/api/oauth-callback" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/", "has": [{ "type": "query", "key": "code" }], "destination": "/api/oauth-callback" }
   ]
 }

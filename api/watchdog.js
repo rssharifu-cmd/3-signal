@@ -13,6 +13,7 @@
 const { generateDailyIntelligence } = require("./_lib/generateDailyIntelligence");
 const { getDb } = require("./_lib/db");
 const { cors, extractEmail } = require("./_lib/authMiddleware");
+const { getEntitlements } = require("./_lib/plans");
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
@@ -85,6 +86,17 @@ module.exports = async function handler(req, res) {
 
   try {
     const db = await getDb();
+
+    // Check plan entitlements
+    const callerUser = await db.collection("users").findOne({ email: authedEmail.toLowerCase() });
+    const entitlements = getEntitlements(callerUser);
+
+    if (entitlements.enforced && entitlements.status === "expired") {
+      return res.status(403).json({
+        error: "plan_required",
+        message: "Your free trial has ended. Choose a plan to continue.",
+      });
+    }
 
     // ── 1. GET: Retrieve latest report OR run pipeline ──────────────────────
     if (req.method === "GET") {

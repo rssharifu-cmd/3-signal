@@ -35,6 +35,7 @@ const {
 } = require("./intelligence");
 const { normalizeMonitoringPreferences } = require("./preferences");
 const { searchWeb, fetchRssFeed, searchReddit, GOOGLE_SEARCH_CENTRAL_FEED } = require("./research");
+const { getEntitlements } = require("./plans");
 
 /**
  * Maps raw provider identifiers to display labels.
@@ -239,12 +240,22 @@ async function generateDailyIntelligence(userId, options = {}) {
     (s) => s.selectedProperty && s.selectedProperty.id
   );
 
-  // ── REQUIREMENT 2: ZERO CONNECTED DATA SOURCES CHECK ──────────────────────
-  // If zero sources connected, short-circuit immediately:
-  // - Do NOT generate an "All systems normal" report
+  // Resolve plan entitlements and allowed providers
+  const entitlements = getEntitlements(user);
+  const allowedProvidersSet = new Set(entitlements.allowedProviders || []);
+
+  const allowedSources = activeSourcesWithProperty.filter((s) =>
+    allowedProvidersSet.has(s.provider)
+  );
+  const notInPlanSources = activeSourcesWithProperty.filter(
+    (s) => !allowedProvidersSet.has(s.provider)
+  );
+
+  // ── REQUIREMENT 2: ZERO ALLOWED CONNECTED DATA SOURCES CHECK ─────────────
+  // If zero allowed sources connected, short-circuit immediately:
   // - Return clear "no_sources" / "Monitoring not active" state
   // - Do NOT call Gemini, external research, or invent metrics
-  if (activeSourcesWithProperty.length === 0) {
+  if (allowedSources.length === 0) {
     let targetDate = options.targetDate;
     if (!targetDate) {
       targetDate = await getLatestSnapshotDate({ userEmail });
@@ -255,12 +266,50 @@ async function generateDailyIntelligence(userId, options = {}) {
     }
 
     const reportId = new ObjectId();
-    const intelligence = buildNoSourcesInterpretation();
+    let intelligence;
+    if (entitlements.planKey === "analytics" && notInPlanSources.length > 0) {
+      intelligence = {
+        headline: "Monitoring not active · Connect your store data",
+        summary: "Your plan monitors Google Analytics. Connect GA4 or switch to Complete.",
+        status: "no_sources",
+        recommendations: [
+          {
+            title: "Connect Google Analytics 4",
+            description: "Your plan monitors Google Analytics. Connect GA4 or switch to Complete.",
+            actionUrl: "#sources",
+          },
+        ],
+      };
+    } else {
+      intelligence = buildNoSourcesInterpretation();
+    }
+
     const emptySummary = {
       fetchedCount: 0,
-      providers: [],
+      providers: notInPlanSources.map((s) => ({
+        provider: s.provider,
+        propertyRef: s.selectedProperty?.id,
+        status: "not_in_plan",
+        available: false,
+        success: true,
+        snapshotsCount: 0,
+        error: null,
+        reason: "Not included in your plan",
+      })),
       errors: [],
     };
+
+    const notInPlanActiveSources = notInPlanSources.map((s) => ({
+      provider: s.provider,
+      propertyId: s.selectedProperty.id,
+      propertyName: s.selectedProperty.name,
+      url: s.selectedProperty.url,
+      lastSync: s.lastSuccessfulSync || null,
+      status: "not_in_plan",
+      text: "Not included in your plan",
+      reason: "Not included in your plan",
+      error: null,
+    }));
 
     const report = {
       reportId: String(reportId),
@@ -272,7 +321,7 @@ async function generateDailyIntelligence(userId, options = {}) {
       websiteUrl: user.profile?.websiteUrl || "",
       monitoringStatus: "no_sources",
       status: "no_sources",
-      activeSources: [],
+      activeSources: notInPlanActiveSources,
       dataFetchSummary: emptySummary,
       fetchSummary: emptySummary,
       comparisonWindows: {},
@@ -322,8 +371,8 @@ async function generateDailyIntelligence(userId, options = {}) {
   const newSnapshots = [];
 
   // ── 2. DATA FETCHING (STEP 1) ─────────────────────────────────────────────
-  if (!options.skipFetch && activeSourcesWithProperty.length > 0) {
-    for (const source of activeSourcesWithProperty) {
+  if (!options.skipFetch && allowedSources.length > 0) {
+    for (const source of allowedSources) {
       const provider = source.provider;
       const propertyRef = source.selectedProperty.id;
 
@@ -401,7 +450,7 @@ async function generateDailyIntelligence(userId, options = {}) {
   const unusableProviders = [];
 
   const providersToAnalyze = [
-    ...new Set(activeSourcesWithProperty.map((s) => s.provider)),
+    ...new Set(allowedSources.map((s) => s.provider)),
   ];
 
   for (const prov of providersToAnalyze) {
@@ -463,29 +512,55 @@ async function generateDailyIntelligence(userId, options = {}) {
   // - Do NOT invent metrics
   if (usableProviders.length === 0) {
     const reportId = new ObjectId();
+    const notInPlanProviderSummaries = notInPlanSources.map((s) => ({
+      provider: s.provider,
+      propertyRef: s.selectedProperty?.id,
+      status: "not_in_plan",
+      available: false,
+      success: true,
+      snapshotsCount: 0,
+      error: null,
+      reason: "Not included in your plan",
+    }));
+
+    const notInPlanSourceEntries = notInPlanSources.map((s) => ({
+      provider: s.provider,
+      propertyId: s.selectedProperty.id,
+      propertyName: s.selectedProperty.name,
+      url: s.selectedProperty.url,
+      lastSync: s.lastSuccessfulSync || null,
+      status: "not_in_plan",
+      text: "Not included in your plan",
+      reason: "Not included in your plan",
+      error: null,
+    }));
+
     const fetchSummary = {
       fetchedCount: newSnapshots.length,
-      providers: activeSourcesWithProperty.map((source) => {
-        const prov = source.provider;
-        const fetchRes = fetchResults.find((r) => r.provider === prov);
-        const fetchErr = fetchErrors.find((e) => e.provider === prov);
-        const isUnusable = unusableProviders.find((u) => u.provider === prov);
-        return {
-          provider: prov,
-          propertyRef: source.selectedProperty?.id,
-          status: fetchErr ? "error" : "unavailable",
-          available: false,
-          success: !fetchErr,
-          snapshotsCount: fetchRes?.snapshotsCount || 0,
-          error: fetchErr?.error || null,
-          reason: isUnusable?.reason || null,
-        };
-      }),
+      providers: [
+        ...allowedSources.map((source) => {
+          const prov = source.provider;
+          const fetchRes = fetchResults.find((r) => r.provider === prov);
+          const fetchErr = fetchErrors.find((e) => e.provider === prov);
+          const isUnusable = unusableProviders.find((u) => u.provider === prov);
+          return {
+            provider: prov,
+            propertyRef: source.selectedProperty?.id,
+            status: fetchErr ? "error" : "unavailable",
+            available: false,
+            success: !fetchErr,
+            snapshotsCount: fetchRes?.snapshotsCount || 0,
+            error: fetchErr?.error || null,
+            reason: isUnusable?.reason || null,
+          };
+        }),
+        ...notInPlanProviderSummaries,
+      ],
       errors: fetchErrors,
     };
 
     const intelligence = buildInsufficientDataInterpretation(unusableProviders);
-    const websiteUrl = user.profile?.websiteUrl || activeSourcesWithProperty[0]?.selectedProperty?.url || "";
+    const websiteUrl = user.profile?.websiteUrl || allowedSources[0]?.selectedProperty?.url || "";
 
     const report = {
       reportId: String(reportId),
@@ -497,20 +572,23 @@ async function generateDailyIntelligence(userId, options = {}) {
       websiteUrl,
       monitoringStatus: "insufficient_data",
       status: "insufficient_data",
-      activeSources: activeSourcesWithProperty.map((s) => {
-        const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
-        const unusable = unusableProviders.find((u) => u.provider === s.provider);
-        return {
-          provider: s.provider,
-          propertyId: s.selectedProperty.id,
-          propertyName: s.selectedProperty.name,
-          url: s.selectedProperty.url,
-          lastSync: s.lastSuccessfulSync || null,
-          status: fetchErr ? "error" : "insufficient_data",
-          error: fetchErr?.error || null,
-          reason: unusable?.reason || null,
-        };
-      }),
+      activeSources: [
+        ...allowedSources.map((s) => {
+          const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
+          const unusable = unusableProviders.find((u) => u.provider === s.provider);
+          return {
+            provider: s.provider,
+            propertyId: s.selectedProperty.id,
+            propertyName: s.selectedProperty.name,
+            url: s.selectedProperty.url,
+            lastSync: s.lastSuccessfulSync || null,
+            status: fetchErr ? "error" : "insufficient_data",
+            error: fetchErr?.error || null,
+            reason: unusable?.reason || null,
+          };
+        }),
+        ...notInPlanSourceEntries,
+      ],
       dataFetchSummary: fetchSummary,
       fetchSummary,
       comparisonWindows: comparisonWindowsByProvider,
@@ -555,11 +633,11 @@ async function generateDailyIntelligence(userId, options = {}) {
     return report;
   }
 
-  // ── 4. DETERMINISTIC ANOMALY DETECTION (STEP 3) ───────────────────────────
   // Weekly GSC URL Inspection supplement (indexing status + mobile usability)
+  // Gated by entitlements.urlInspection (Complete plan or trial)
   let urlInspectionResult = null;
   const usableGsc = usableProviders.find((u) => u.provider === "google_search_console");
-  if (usableGsc && usableGsc.propertyRef) {
+  if (entitlements.urlInspection && usableGsc && usableGsc.propertyRef) {
     try {
       urlInspectionResult = await loadLatestUrlInspection(userEmail, usableGsc.propertyRef);
       if (!options.skipFetch && isInspectionDue(urlInspectionResult)) {
@@ -635,25 +713,51 @@ async function generateDailyIntelligence(userId, options = {}) {
 
   // ── 7. COMPILE FINAL REPORT ───────────────────────────────────────────────
   const reportId = new ObjectId();
+  const notInPlanFinalSummaries = notInPlanSources.map((s) => ({
+    provider: s.provider,
+    propertyRef: s.selectedProperty?.id,
+    status: "not_in_plan",
+    available: false,
+    success: true,
+    snapshotsCount: 0,
+    error: null,
+    reason: "Not included in your plan",
+  }));
+
+  const notInPlanFinalSourceEntries = notInPlanSources.map((s) => ({
+    provider: s.provider,
+    propertyId: s.selectedProperty.id,
+    propertyName: s.selectedProperty.name,
+    url: s.selectedProperty.url,
+    lastSync: s.lastSuccessfulSync || null,
+    status: "not_in_plan",
+    text: "Not included in your plan",
+    reason: "Not included in your plan",
+    error: null,
+  }));
+
   const fetchSummary = {
     fetchedCount: newSnapshots.length,
-    providers: activeSourcesWithProperty.map((source) => {
-      const prov = source.provider;
-      const fetchRes = fetchResults.find((r) => r.provider === prov);
-      const fetchErr = fetchErrors.find((e) => e.provider === prov);
-      const isUsable = usableProviders.find((u) => u.provider === prov);
-      const isUnusable = unusableProviders.find((u) => u.provider === prov);
-      return {
-        provider: prov,
-        propertyRef: source.selectedProperty?.id,
-        status: fetchErr ? "error" : (isUsable ? "available" : "unavailable"),
-        available: Boolean(isUsable),
-        success: !fetchErr,
-        snapshotsCount: fetchRes?.snapshotsCount || isUsable?.snapshotsLoaded || 0,
-        error: fetchErr?.error || null,
-        reason: isUnusable?.reason || null,
-      };
-    }),
+    providers: [
+      ...allowedSources.map((source) => {
+        const prov = source.provider;
+        const fetchRes = fetchResults.find((r) => r.provider === prov);
+        const fetchErr = fetchErrors.find((e) => e.provider === prov);
+        const isUsable = usableProviders.find((u) => u.provider === prov);
+        const isUnusable = unusableProviders.find((u) => u.provider === prov);
+        return {
+          provider: prov,
+          propertyRef: source.selectedProperty?.id,
+          status: fetchErr ? "error" : (isUsable ? "available" : "unavailable"),
+          available: Boolean(isUsable),
+          success: !fetchErr,
+          snapshotsCount: fetchRes?.snapshotsCount || isUsable?.snapshotsLoaded || 0,
+          error: fetchErr?.error || null,
+          reason: isUnusable?.reason || null,
+        };
+      }),
+      ...notInPlanFinalSummaries,
+    ],
     errors: fetchErrors,
   };
 
@@ -726,21 +830,24 @@ async function generateDailyIntelligence(userId, options = {}) {
     status: intelligence.status || (findings.length === 0 ? "stable" : "warning"),
     userPreferences,
     storePerformance,
-    activeSources: activeSourcesWithProperty.map((s) => {
-      const isUsable = usableProviders.some((u) => u.provider === s.provider);
-      const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
-      const unusable = unusableProviders.find((u) => u.provider === s.provider);
-      return {
-        provider: s.provider,
-        propertyId: s.selectedProperty.id,
-        propertyName: s.selectedProperty.name,
-        url: s.selectedProperty.url,
-        lastSync: s.lastSuccessfulSync || now,
-        status: isUsable ? "active" : (fetchErr ? "error" : "insufficient_data"),
-        error: fetchErr?.error || null,
-        reason: unusable?.reason || null,
-      };
-    }),
+    activeSources: [
+      ...allowedSources.map((s) => {
+        const isUsable = usableProviders.some((u) => u.provider === s.provider);
+        const fetchErr = fetchErrors.find((e) => e.provider === s.provider);
+        const unusable = unusableProviders.find((u) => u.provider === s.provider);
+        return {
+          provider: s.provider,
+          propertyId: s.selectedProperty.id,
+          propertyName: s.selectedProperty.name,
+          url: s.selectedProperty.url,
+          lastSync: s.lastSuccessfulSync || now,
+          status: isUsable ? "active" : (fetchErr ? "error" : "insufficient_data"),
+          error: fetchErr?.error || null,
+          reason: unusable?.reason || null,
+        };
+      }),
+      ...notInPlanFinalSourceEntries,
+    ],
     dataFetchSummary: fetchSummary,
     fetchSummary,
     comparisonWindows: comparisonWindowsByProvider,

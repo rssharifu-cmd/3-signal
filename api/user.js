@@ -10,6 +10,7 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { getDb } = require("./_lib/db");
+const { getEntitlements, ensureTrial, TRIAL_DAYS } = require("./_lib/plans");
 
 function cors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -38,8 +39,10 @@ function extractEmail(req) {
 }
 
 function safeUser(user) {
+  if (!user) return user;
   const { passwordHash, ...rest } = user;
-  return rest;
+  const entitlements = getEntitlements(user);
+  return { ...rest, entitlements };
 }
 
 async function handler(req, res) {
@@ -63,11 +66,15 @@ async function handler(req, res) {
     if (req.method === "GET") {
       let user = await users.findOne({ email });
       if (!user) {
+        const trialStartedAt = now;
+        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
         user = {
           email,
           name: email.split("@")[0] || "User",
           passwordHash: "",
           plan: "starter",
+          trialStartedAt,
+          trialEndsAt,
           active: true,
           profile: null,
           settings: {
@@ -81,6 +88,8 @@ async function handler(req, res) {
           updatedAt: now,
         };
         await users.insertOne(user);
+      } else if (!user.trialEndsAt) {
+        user = await ensureTrial(db, user, now);
       }
 
       if (queryAction === "checkout_token") {
@@ -113,7 +122,8 @@ async function handler(req, res) {
         return res.status(200).json({ ok: true, checkoutToken });
       }
 
-      return res.status(200).json({ ok: true, user: safeUser(user) });
+      const entitlements = getEntitlements(user);
+      return res.status(200).json({ ok: true, user: safeUser(user), entitlements });
     }
 
     if (req.method === "POST") {
@@ -247,7 +257,8 @@ async function handler(req, res) {
       await users.updateOne({ email }, update);
 
       const updatedUser = await users.findOne({ email });
-      return res.status(200).json({ ok: true, user: safeUser(updatedUser) });
+      const entitlements = getEntitlements(updatedUser);
+      return res.status(200).json({ ok: true, user: safeUser(updatedUser), entitlements });
     }
 
     return res.status(405).json({ error: "Method not allowed" });
