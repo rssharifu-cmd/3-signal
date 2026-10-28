@@ -2698,6 +2698,7 @@ function resetAll() {
   userMemory = null;
   document.getElementById("landing-view").classList.remove("hidden");
   document.getElementById("app-shell").style.display = "none";
+  updateLandingScrollProgress();
   toast("Signed out locally — refresh to start over");
 }
 
@@ -3474,3 +3475,41 @@ window.updateBillingPanelUI = updateBillingPanelUI;
 window.updateOverviewTrialBanner = updateOverviewTrialBanner;
 window.refreshUserPlanFromServer = refreshUserPlanFromServer;
 window.SHARFLOW_PRO_PRICE_ID = SHARFLOW_PRO_PRICE_ID;
+
+// ── Landing Page Scroll Progress Indicator ──────────────────────────────────
+function updateLandingScrollProgress() {
+  const landingView = document.getElementById("landing-view");
+  if (!landingView || landingView.classList.contains("hidden")) return;
+
+  const bar = document.getElementById("scroll-progress-bar");
+  if (!bar) return;
+
+  const scrollTop = window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || 0;
+  const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = scrollHeight > 0 ? Math.min(Math.max(scrollTop / scrollHeight, 0), 1) : 0;
+
+  bar.style.transform = `scaleX(${progress})`;
+}
+
+let scrollProgressTicking = false;
+function handleScrollProgress() {
+  if (!scrollProgressTicking) {
+    window.requestAnimationFrame(() => {
+      updateLandingScrollProgress();
+      scrollProgressTicking = false;
+    });
+    scrollProgressTicking = true;
+  }
+}
+
+window.addEventListener("scroll", handleScrollProgress, { passive: true });
+window.addEventListener("resize", handleScrollProgress, { passive: true });
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", updateLandingScrollProgress);
+} else {
+  updateLandingScrollProgress();
+}
+window.addEventListener("load", updateLandingScrollProgress);
+window.updateLandingScrollProgress = updateLandingScrollProgress;
+
