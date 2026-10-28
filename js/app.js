@@ -2718,21 +2718,38 @@ window.onload = async () => {
     }
   } catch {}
 
+  const cleanupSignupParam = () => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get("signup") === "1") {
+        urlParams.delete("signup");
+        const newQuery = urlParams.toString();
+        const newUrl = window.location.pathname + (newQuery ? `?${newQuery}` : "") + window.location.hash;
+        window.history.replaceState(null, "", newUrl);
+      }
+    } catch {}
+  };
+
   // Initialize Paddle client in background
   initPaddle();
 
   if (tryMigrateLegacy()) {
     showDashboard(new Date(localStorage.getItem(STORAGE.lock)), localStorage.getItem(STORAGE.profile));
+    cleanupSignupParam();
     return;
   }
 
   const hydrated = await hydrateSession();
-  if (hydrated) return;
+  if (hydrated) {
+    cleanupSignupParam();
+    return;
+  }
 
   const prof = localStorage.getItem(STORAGE.profile);
   if (prof) {
     const lock = localStorage.getItem(STORAGE.lock);
     showDashboard(lock ? new Date(lock) : new Date(0), prof);
+    cleanupSignupParam();
     return;
   }
 
@@ -2743,6 +2760,17 @@ window.onload = async () => {
     } catch {
       profileFormData = {};
     }
+  }
+
+  // If URL query has signup=1, open signup modal after app initializes, then remove param
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("signup") === "1") {
+      openAuthModal("signup");
+      cleanupSignupParam();
+    }
+  } catch (err) {
+    console.warn("Could not handle signup query parameter:", err.message);
   }
 };
 
