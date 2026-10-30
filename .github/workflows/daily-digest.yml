@@ -9,6 +9,8 @@ on:
 jobs:
   run-watchdog:
     name: Run Website Watchdog Intelligence Cycle
+    # Only the approved production branch may consume production service secrets.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -26,6 +28,8 @@ jobs:
 
       - name: Execute Watchdog Scheduler
         env:
+          APP_ENV: production
+          EMAIL_DELIVERY_MODE: resend
           PLANS_ENFORCED: ${{ secrets.PLANS_ENFORCED }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

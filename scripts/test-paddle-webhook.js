@@ -162,7 +162,7 @@ function applySetUpdate(doc, setObj) {
 }
 
 function createMockDb(initialUsers = [], initialEvents = []) {
-  const usersList = JSON.parse(JSON.stringify(initialUsers));
+  const usersList = JSON.parse(JSON.stringify(initialUsers.map(u => ({emailVerifiedAt: new Date(), authVersion: "fixture-version", ...u}))));
   const eventsList = JSON.parse(JSON.stringify(initialEvents));
 
   const users = {
@@ -364,7 +364,7 @@ async function runAllTests() {
     ]);
     global.__mockDb = mockDb;
 
-    const token = jwt.sign({ email: "victim@example.com" }, TEST_JWT_SECRET);
+    const token = jwt.sign({ email: "victim@example.com", purpose:"session", av:"fixture-version" }, TEST_JWT_SECRET);
     const req = {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
@@ -393,7 +393,7 @@ async function runAllTests() {
     ]);
     global.__mockDb = mockDb;
 
-    const token = jwt.sign({ email: "normal@example.com" }, TEST_JWT_SECRET);
+    const token = jwt.sign({ email: "normal@example.com", purpose:"session", av:"fixture-version" }, TEST_JWT_SECRET);
     const req = {
       method: "POST",
       headers: { authorization: `Bearer ${token}` },
@@ -429,7 +429,7 @@ async function runAllTests() {
     ]);
     global.__mockDb = mockDb;
 
-    const token = jwt.sign({ email: "payer@example.com" }, TEST_JWT_SECRET);
+    const token = jwt.sign({ email: "payer@example.com", purpose:"session", av:"fixture-version" }, TEST_JWT_SECRET);
     const req = {
       method: "GET",
       url: "/api/user?action=checkout_token",

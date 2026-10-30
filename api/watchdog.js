@@ -1,3 +1,4 @@
+const { requireAccount, verified } = require("./_lib/accountSecurity");
 /**
  * Sharflow — Watchdog Daily Intelligence Review & Debug API
  *
@@ -10,6 +11,7 @@
  * POST /api/watchdog { action: "run", userId: "...", targetDate: "YYYY-MM-DD" }
  */
 
+const { ObjectId } = require("mongodb");
 const { generateDailyIntelligence } = require("./_lib/generateDailyIntelligence");
 const { getDb } = require("./_lib/db");
 const { cors, extractEmail } = require("./_lib/authMiddleware");
@@ -17,17 +19,15 @@ const { getEntitlements } = require("./_lib/plans");
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed." });
 
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
   // 1. Require a valid authenticated session
-  const authedEmail = extractEmail(req);
-  if (!authedEmail) {
-    return res.status(401).json({
-      ok: false,
-      error: "Unauthorized: Missing or invalid JWT session token.",
-    });
-  }
+  const authenticatedUser = await requireAccount(req, res, { allowReview: false });
+  if (!authenticatedUser) return;
+  const authedEmail = authenticatedUser.email;
 
   // 2. Authorize admin check
   const rawAdminEmails = process.env.ADMIN_EMAILS || "";
@@ -37,40 +37,26 @@ module.exports = async function handler(req, res) {
     .filter(Boolean);
   const isUserAdmin = adminList.length > 0 && adminList.includes(authedEmail.toLowerCase());
 
-  // 3. Determine requested target user (if an explicit query or body param was provided)
-  const requestedEmail =
-    req.query?.email ||
-    urlObj.searchParams.get("email") ||
-    (req.body && req.body.email);
-  const requestedUserId =
-    req.query?.userId ||
-    urlObj.searchParams.get("userId") ||
-    (req.body && req.body.userId);
-
-  let targetUser = authedEmail;
-
-  if (requestedEmail) {
-    const isSelf = requestedEmail.trim().toLowerCase() === authedEmail.trim().toLowerCase();
-    if (!isSelf && !isUserAdmin) {
-      return res.status(403).json({
-        ok: false,
-        error: "Forbidden: You do not have permission to access another user's watchdog data.",
-      });
+  // Gather every supplied identity; query/body precedence must never select another target.
+  const body = req.body || {};
+  function identityValue(key, normalize) {
+    const values = [...urlObj.searchParams.getAll(key)];
+    if (req.query && Object.prototype.hasOwnProperty.call(req.query, key)) values.push(req.query[key]);
+    if (Object.prototype.hasOwnProperty.call(body, key)) values.push(body[key]);
+    if (values.some((v) => typeof v !== "string" || !v.trim() || v.length > 320)) {
+      throw new Error("Invalid target identifier.");
     }
-    targetUser = isUserAdmin ? requestedEmail.trim() : authedEmail;
-  } else if (requestedUserId) {
-    if (!isUserAdmin) {
-      const db = await getDb();
-      const currentUser = await db.collection("users").findOne({ email: authedEmail.toLowerCase() });
-      const currentUserIdStr = currentUser?._id ? currentUser._id.toString() : null;
-      if (!currentUserIdStr || currentUserIdStr !== String(requestedUserId).trim()) {
-        return res.status(403).json({
-          ok: false,
-          error: "Forbidden: You do not have permission to access another user's watchdog data.",
-        });
-      }
-    }
-    targetUser = String(requestedUserId).trim();
+    const normalized = [...new Set(values.map((v) => normalize(v.trim())))];
+    if (normalized.length > 1) throw new Error("Conflicting target identifiers.");
+    return normalized[0] || null;
+  }
+  let requestedEmail, requestedUserId;
+  try {
+    requestedEmail = identityValue("email", (v) => v.toLowerCase());
+    requestedUserId = identityValue("userId", (v) => /^[a-f0-9]{24}$/i.test(v) ? v.toLowerCase() : v);
+    if (requestedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requestedEmail)) throw new Error("Invalid target email.");
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: err.message });
   }
 
   const targetDate = req.query?.targetDate || urlObj.searchParams.get("targetDate") || undefined;
@@ -87,9 +73,29 @@ module.exports = async function handler(req, res) {
   try {
     const db = await getDb();
 
-    // Check plan entitlements
-    const callerUser = await db.collection("users").findOne({ email: authedEmail.toLowerCase() });
-    const entitlements = getEntitlements(callerUser);
+    const users = db.collection("users");
+    const callerUser = await users.findOne({ email: authedEmail });
+    if (!callerUser || callerUser.active === false) return res.status(403).json({ error: "Account unavailable." });
+    let targetAccount = callerUser;
+    if (!isUserAdmin) {
+      if ((requestedEmail && requestedEmail !== callerUser.email.toLowerCase()) ||
+          (requestedUserId && requestedUserId !== String(callerUser._id))) {
+        return res.status(403).json({ ok: false, error: "Forbidden: You can only access your own watchdog data." });
+      }
+    } else {
+      if (requestedEmail) targetAccount = await users.findOne({ email: requestedEmail });
+      else if (requestedUserId) {
+        const ids = ObjectId.isValid(requestedUserId) ? [requestedUserId, new ObjectId(requestedUserId)] : [requestedUserId];
+        targetAccount = await users.findOne({ _id: { $in: ids } });
+      }
+      if (!targetAccount) return res.status(404).json({ error: "Target account not found." });
+      if (requestedUserId && requestedUserId !== String(targetAccount._id)) {
+        return res.status(400).json({ error: "Conflicting target identifiers." });
+      }
+    }
+    if (!verified(targetAccount) || targetAccount.configurationReviewRequired) return res.status(403).json({error:"Verified target account required."});
+    const targetUser = targetAccount.email;
+    const entitlements = getEntitlements(targetAccount);
 
     if (entitlements.enforced && entitlements.status === "expired") {
       return res.status(403).json({
@@ -104,7 +110,7 @@ module.exports = async function handler(req, res) {
         const report = await db
           .collection("intelligence_reports")
           .findOne(
-            { $or: [{ userEmail: targetUser }, { userId: targetUser }] },
+            { userEmail: targetUser },
             { sort: { targetDate: -1, generatedAt: -1 } }
           );
         if (report) {
@@ -135,8 +141,7 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ ok: false, error: `Invalid action: ${action}. Use 'run'.` });
       }
 
-      const postTargetUser = body.userId || body.email || targetUser;
-      const report = await generateDailyIntelligence(postTargetUser, {
+      const report = await generateDailyIntelligence(targetUser, {
         targetDate: body.targetDate || targetDate,
         skipFetch: Boolean(body.skipFetch ?? skipFetch),
         dryRun: Boolean(body.dryRun ?? dryRun),

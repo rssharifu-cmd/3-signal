@@ -15,6 +15,7 @@
  */
 
 require("dotenv").config();
+const { verified } = require("../api/_lib/accountSecurity");
 const { getDb } = require("../api/_lib/db");
 const { generateDailyIntelligence } = require("../api/_lib/generateDailyIntelligence");
 const { sendWatchdogEmail } = require("../api/send");
@@ -34,6 +35,7 @@ function chunkArray(array, size) {
 }
 
 async function processUser(user, db, targetDate) {
+  if (!verified(user) || user.configurationReviewRequired) return { status: "skipped", reason: "ownership_or_review_required" };
   const email = user.email;
   const userId = String(user._id);
   const websiteUrl = user.profile?.websiteUrl || "";
@@ -104,6 +106,7 @@ async function processUser(user, db, targetDate) {
           toEmail: email,
           userName: user.name || email.split("@")[0],
           report,
+          entitlements,
         });
         emailSent = true;
         console.log(`[Watchdog Scheduler] Email sent successfully to ${email}`);

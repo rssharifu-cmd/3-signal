@@ -1,3 +1,4 @@
+const { requireAccount } = require("./_lib/accountSecurity");
 /**
  * Sharflow — Data Sources Management API
  *
@@ -25,10 +26,10 @@ const { verifyGa4Status } = require("./_lib/ga4Status");
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
 
-  const userEmail = extractEmail(req);
-  if (!userEmail) {
-    return res.status(401).json({ ok: false, error: "Unauthorized. Please sign in to access data sources." });
-  }
+  if (req.method === "OPTIONS") return res.status(204).end();
+  const authenticatedUser = await requireAccount(req, res, { allowReview: false });
+  if (!authenticatedUser) return;
+  const userEmail = authenticatedUser.email;
 
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   const action = req.query.action || urlObj.searchParams.get("action");
@@ -41,7 +42,8 @@ module.exports = async function handler(req, res) {
 
     // ── 1. GET ALL DATA SOURCE STATUSES ─────────────────────────────────────
     if (req.method === "GET" && !action) {
-      const records = await datasourcesCol.find({ userEmail }).toArray();
+      const allRecords = await datasourcesCol.find({ userEmail }).toArray();
+      const records = allRecords.filter(r => !authenticatedUser.integrationResetAt || r.ownershipVerifiedAt >= authenticatedUser.integrationResetAt);
       const user = await usersCol.findOne({ email: userEmail });
 
       const ga4Rec = records.find((r) => r.provider === "google_analytics");
@@ -104,7 +106,8 @@ module.exports = async function handler(req, res) {
     // ── 1B. ON-DEMAND VERIFY DATA SOURCE STATUS ──────────────────────────────
     if (req.method === "GET" && action === "verify") {
       if (provider === "google_analytics") {
-        const ga4Rec = await datasourcesCol.findOne({ userEmail, provider: "google_analytics" });
+        let ga4Rec = await datasourcesCol.findOne({ userEmail, provider: "google_analytics" });
+        if (authenticatedUser.integrationResetAt && !(ga4Rec?.ownershipVerifiedAt >= authenticatedUser.integrationResetAt)) ga4Rec = null;
         const user = await usersCol.findOne({ email: userEmail });
         const ga4Status = await verifyGa4Status({
           userEmail,
@@ -137,14 +140,7 @@ module.exports = async function handler(req, res) {
       }
 
       if (provider === "bing_webmaster" || provider === "bing") {
-        let accessToken = null;
-        try {
-          const bingAuth = await getBingAccessToken(userEmail);
-          accessToken = bingAuth.accessToken;
-        } catch (err) {
-          // If individual token fails but BING_WEBMASTER_API_KEY is configured for testing:
-          if (!process.env.BING_WEBMASTER_API_KEY) throw err;
-        }
+        const { accessToken } = await getBingAccessToken(userEmail);
         const properties = await discoverBingSites(accessToken);
         return res.status(200).json({ ok: true, provider: "bing_webmaster", properties });
       }
@@ -158,6 +154,8 @@ module.exports = async function handler(req, res) {
       const reqAction = body.action || action;
 
       if (reqAction === "select_property") {
+        const source = await datasourcesCol.findOne({ userEmail, provider: body.provider || provider });
+        if (!source || (authenticatedUser.integrationResetAt && !(source.ownershipVerifiedAt >= authenticatedUser.integrationResetAt))) return res.status(403).json({ error: "Reconnect source after ownership verification." });
         const targetProvider = body.provider || provider;
         const property = body.property;
 

@@ -1,3 +1,4 @@
+const { requireAccount, verified } = require("./_lib/accountSecurity");
 /**
  * Vercel Node.js Serverless — POST /api/send
  *
@@ -15,12 +16,10 @@ const RESEND_URL = "https://api.resend.com/emails";
 const { normalizeMonitoringPreferences, matchesUserPreferences } = require("./_lib/preferences");
 const { getDb } = require("./_lib/db");
 const { getEntitlements } = require("./_lib/plans");
+const { extractEmail } = require("./_lib/authMiddleware");
+const { claimEmailSend } = require("./_lib/emailSendGuard");
 
-function cors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
+const { cors } = require("./_lib/authMiddleware");
 
 function parseBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
@@ -520,7 +519,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "", entitlements = nu
  * @param {object} params.report
  * @returns {Promise<object>}
  */
-async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlements = null }) {
+async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlements = null, idempotencyKey = null }) {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
   const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
 
@@ -531,15 +530,16 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
     throw new Error("toEmail is required.");
   }
 
-  let resolvedEntitlements = entitlements || report.entitlements || null;
-  if (!resolvedEntitlements && toEmail) {
-    try {
-      const db = await getDb();
-      const user = await db.collection("users").findOne({ email: toEmail.toLowerCase() });
-      if (user) {
-        resolvedEntitlements = getEntitlements(user);
-      }
-    } catch (_) {}
+  if (typeof report.userEmail !== "string" || report.userEmail.toLowerCase() !== toEmail.toLowerCase()) {
+    throw new Error("Report recipient does not match report owner.");
+  }
+  const ownerDb = await getDb();
+  const owner = await ownerDb.collection("users").findOne({ email: toEmail.toLowerCase() });
+  if (!verified(owner) || owner.configurationReviewRequired) throw new Error("Verified report owner required.");
+  if (process.env.EMAIL_DELIVERY_MODE !== "resend") throw new Error("Email delivery is disabled.");
+  let resolvedEntitlements = getEntitlements(owner);
+  if (resolvedEntitlements.enforced && !resolvedEntitlements.canRunMonitoring) {
+    throw new Error("An active monitoring plan is required.");
   }
 
   const subject = getWatchdogEmailSubject(report);
@@ -550,6 +550,7 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: JSON.stringify({
       from: fromEmail,
@@ -569,7 +570,7 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
 
 // ── HTTP HANDLER ─────────────────────────────────────────────────────────────
 async function handler(req, res) {
-  cors(res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
 
   if (req.method === "GET") {
@@ -578,85 +579,83 @@ async function handler(req, res) {
 
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const apiKey = (process.env.RESEND_API_KEY || "").trim();
-  const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
-
-  if (!apiKey) {
-    return res.status(400).json({ error: "Missing RESEND_API_KEY env var." });
-  }
+  const authenticatedUser = await requireAccount(req, res);
+  if (!authenticatedUser) return;
+  const email = authenticatedUser.email;
 
   try {
     const body = parseBody(req);
     const action = body.action || "watchdog_report";
-    const toEmail = (body.email || "").trim();
+    const allowedKeys = new Set(["action", "reportId"]);
+    if (Object.keys(body).some((key) => !allowedKeys.has(key))) {
+      return res.status(400).json({ error: "Only action and reportId are accepted. Recipients and content are loaded from your account." });
+    }
+    if (!["welcome", "watchdog_report", "digest"].includes(action)) {
+      return res.status(400).json({ error: "Unknown email action." });
+    }
 
-    if (!toEmail) return res.status(400).json({ error: "email is required" });
-
-    let subject, html;
-
-    // ── WELCOME ──────────────────────────────────────────────────────────────
+    const db = await getDb();
+    const user = await db.collection("users").findOne({ email });
+    if (!user || user.active === false) return res.status(403).json({ error: "Account unavailable." });
+    const entitlements = getEntitlements(user);
+    let report = null;
     if (action === "welcome") {
-      const name = body.name || "";
-      const websiteUrl = body.websiteUrl || body.profile?.websiteUrl || "";
-      const profileSummary = body.profileSummary || body.profile?.summary || "";
-
-      subject = `Welcome to Sharflow${name ? `, ${name.split(" ")[0]}` : ""} — your Website Watchdog is ready`;
-      html = welcomeHtml({ name, websiteUrl, profileSummary, email: toEmail });
-
-    // ── WATCHDOG INTELLIGENCE REPORT ─────────────────────────────────────────
-    } else if (action === "watchdog_report" || action === "digest") {
-      let entitlements = null;
-      try {
-        const db = await getDb();
-        const user = await db.collection("users").findOne({ email: toEmail.toLowerCase() });
-        if (user) {
-          entitlements = getEntitlements(user);
-        }
-      } catch (dbErr) {
-        console.warn("[api/send] db entitlements check warning:", dbErr.message);
+      if (!user.profile || !user.profile.websiteUrl || body.reportId !== undefined) {
+        return res.status(400).json({ error: "Save your website profile before requesting a welcome email." });
       }
-
-      if (entitlements && entitlements.enforced && entitlements.status === "expired") {
-        return res.status(403).json({
-          error: "plan_required",
-          message: "Your free trial has ended. Choose a plan to continue.",
-        });
-      }
-
-      const name = body.name || "";
-      const report = body.report || {};
-      subject = getWatchdogEmailSubject(report);
-      html = watchdogReportHtml({ name, report, entitlements });
-
     } else {
-      return res.status(400).json({ error: "Unknown action. Use 'welcome' or 'watchdog_report'." });
+      if (typeof body.reportId !== "string" || !/^[a-f0-9]{24}$/i.test(body.reportId)) {
+        return res.status(400).json({ error: "A valid saved reportId is required." });
+      }
+      report = await db.collection("intelligence_reports").findOne({ userEmail: email, reportId: body.reportId });
+      if (!report || (report.userId && String(report.userId) !== String(user._id))) {
+        return res.status(404).json({ error: "Report not found." });
+      }
+      if (entitlements.enforced && !entitlements.canRunMonitoring) {
+        return res.status(403).json({ error: "plan_required", message: "Choose a plan to continue." });
+      }
+    }
+    if (process.env.EMAIL_DELIVERY_MODE !== "resend" || !(process.env.RESEND_API_KEY || "").trim()) {
+      return res.status(503).json({ error: "Email delivery is unavailable." });
+    }
+    const claim = await claimEmailSend(db, user._id);
+    if (!claim.allowed) {
+      res.setHeader("Retry-After", String(claim.retryAfter));
+      return res.status(429).json({ error: "Please wait a minute before sending another email." });
     }
 
-    const sendRes = await fetch(RESEND_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        from: fromEmail,
-        to: [toEmail],
-        reply_to: "hello@sharflow.online",
-        subject,
-        html,
-      }),
-    });
-
-    const data = await sendRes.json();
-
-    if (!sendRes.ok) {
-      return res.status(sendRes.status).json({ error: data?.message || data?.name || "Resend API error", details: data });
+    let data;
+    if (report) {
+      data = await sendWatchdogEmail({
+        toEmail: user.email, userName: user.name || "", report, entitlements,
+        idempotencyKey: claim.idempotencyKey,
+      });
+    } else {
+      try { await db.collection("email_send_guards").insertOne({ _id: "welcome:" + String(user._id), requestedAt: new Date() }, { writeConcern: { w: "majority", wtimeoutMS: 5000 } }); }
+      catch (err) { if (err.code !== 11000 || !err.keyPattern?._id) throw err; return res.status(200).json({ ok: true, alreadyRequested: true }); }
+      const html = welcomeHtml({
+        name: user.name || "", email: user.email,
+        websiteUrl: user.profile.websiteUrl, profileSummary: user.profile.summary || "",
+      });
+      const response = await fetch(RESEND_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + process.env.RESEND_API_KEY.trim(),
+          "Idempotency-Key": claim.idempotencyKey,
+        },
+        body: JSON.stringify({
+          from: (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim(),
+          to: [user.email], reply_to: "hello@sharflow.online",
+          subject: "Welcome to Sharflow — your Website Watchdog profile is ready", html,
+        }),
+      });
+      data = await response.json();
+      if (!response.ok) throw new Error("Email provider rejected delivery.");
     }
-
     return res.status(200).json({ ok: true, id: data.id, action });
-
-  } catch (err) {
-    return res.status(500).json({ error: err.message || "Server error" });
+  } catch (_) {
+    return res.status(503).json({ error: "Unable to send email right now. Please try again later." });
   }
 }
 

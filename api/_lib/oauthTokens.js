@@ -1,3 +1,4 @@
+const { verified } = require("./accountSecurity");
 /**
  * Sharflow — OAuth Token and Property Management
  *
@@ -34,7 +35,10 @@ async function getGoogleAccessToken(userEmail) {
   }
 
   const db = await getDb();
+  const owner = await db.collection("users").findOne({ email: userEmail });
+  if (!verified(owner) || owner.configurationReviewRequired) throw new Error("Verified account required.");
   const conn = await db.collection("datasources").findOne({
+    ...(owner.integrationResetAt ? {ownershipVerifiedAt: {$gte: owner.integrationResetAt}} : {}),
     userEmail,
     provider: { $in: ["google_search_console", "google_analytics", "google"] },
     encryptedRefreshToken: { $exists: true, $ne: "" },
@@ -44,6 +48,7 @@ async function getGoogleAccessToken(userEmail) {
     throw new Error("No Google account connected for this user.");
   }
 
+  if (!verified(owner) || owner.configurationReviewRequired || (owner.integrationResetAt && !(conn.ownershipVerifiedAt >= owner.integrationResetAt))) throw new Error("Reconnect this source after ownership verification.");
   const refreshToken = decryptToken(conn.encryptedRefreshToken);
   if (!refreshToken) {
     throw new Error("Failed to decrypt Google refresh token.");
@@ -101,7 +106,10 @@ async function getBingAccessToken(userEmail) {
   }
 
   const db = await getDb();
+  const owner = await db.collection("users").findOne({ email: userEmail });
+  if (!verified(owner) || owner.configurationReviewRequired) throw new Error("Verified account required.");
   const conn = await db.collection("datasources").findOne({
+    ...(owner.integrationResetAt ? {ownershipVerifiedAt: {$gte: owner.integrationResetAt}} : {}),
     userEmail,
     provider: "bing_webmaster",
     encryptedRefreshToken: { $exists: true, $ne: "" },
@@ -111,6 +119,7 @@ async function getBingAccessToken(userEmail) {
     throw new Error("No Bing Webmaster account connected for this user.");
   }
 
+  if (!verified(owner) || owner.configurationReviewRequired || (owner.integrationResetAt && !(conn.ownershipVerifiedAt >= owner.integrationResetAt))) throw new Error("Reconnect this source after ownership verification.");
   const refreshToken = decryptToken(conn.encryptedRefreshToken);
   if (!refreshToken) {
     throw new Error("Failed to decrypt Bing refresh token.");
@@ -218,7 +227,7 @@ async function discoverAnalyticsProperties(accessToken) {
 
 /**
  * Discovers accessible verified sites in Bing Webmaster Tools.
- * Supports individual OAuth access token, with optional fallback to BING_WEBMASTER_API_KEY if testing.
+ * Requires an individual OAuth access token.
  * @param {string} [accessToken]
  * @returns {Promise<Array<{ id: string, name: string, url: string, isVerified: boolean }>>}
  */
@@ -228,11 +237,8 @@ async function discoverBingSites(accessToken) {
 
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
-  } else if (process.env.BING_WEBMASTER_API_KEY) {
-    // Administrative fallback for testing
-    url += `?apikey=${encodeURIComponent(process.env.BING_WEBMASTER_API_KEY.trim())}`;
   } else {
-    throw new Error("No Bing OAuth access token or API key available.");
+    throw new Error("No Bing OAuth access token available.");
   }
 
   const res = await fetch(url, { headers });

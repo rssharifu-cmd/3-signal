@@ -1,3 +1,4 @@
+const { verified } = require("./accountSecurity");
 /**
  * Sharflow — Unified Daily Intelligence Pipeline Entry Point
  *
@@ -222,6 +223,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     throw new Error(`User not found for identifier: ${userId}`);
   }
 
+  if (!verified(user) || user.configurationReviewRequired) throw new Error("Verified and reviewed account required.");
   const userEmail = user.email;
   const stringUserId = String(user._id);
   const now = new Date();
@@ -237,7 +239,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     .toArray();
 
   const activeSourcesWithProperty = connectedSources.filter(
-    (s) => s.selectedProperty && s.selectedProperty.id
+    (s) => s.selectedProperty && s.selectedProperty.id && (!user.integrationResetAt || s.ownershipVerifiedAt >= user.integrationResetAt)
   );
 
   // Resolve plan entitlements and allowed providers
