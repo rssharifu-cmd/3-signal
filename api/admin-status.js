@@ -1,3 +1,4 @@
+const { requireAccount } = require("./_lib/accountSecurity");
 /**
  * Sharflow — Admin API Status Endpoint (/api/admin-status)
  *
@@ -448,14 +449,13 @@ async function checkCronSummary() {
 // ── MAIN HANDLER ──────────────────────────────────────────────────────────────
 
 async function handler(req, res) {
-  cors(req, res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
 
   // 1. Authenticate JWT token
-  const email = extractEmail(req);
-  if (!email) {
-    return res.status(401).json({ error: "Unauthorized: Missing or invalid JWT session token." });
-  }
+  const authenticatedUser = await requireAccount(req, res);
+  if (!authenticatedUser) return;
+  const email = authenticatedUser.email;
 
   // 2. Authorize email against ADMIN_EMAILS allowlist
   const rawAdminEmails = process.env.ADMIN_EMAILS || "";

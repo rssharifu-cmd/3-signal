@@ -49,7 +49,7 @@ test("S2 welcome loads saved profile; missing profile, inactive/missing account 
   const { handler, sent } = setup(); assert.equal((await call(handler, { body: { action: "welcome" } })).statusCode, 200);
   assert.match(sent[0].payload.html, /Saved profile/); assert.match(sent[0].payload.html, /store.example/);
   for (const owner of [null, user({ active: false }), user({ profile: null })]) {
-    const x = setup({ owner }); assert.ok([400, 403].includes((await call(x.handler, { body: { action: "welcome" } })).statusCode)); assert.equal(x.sent.length, 0);
+    const x = setup({ owner }); assert.ok([400, 401, 403].includes((await call(x.handler, { body: { action: "welcome" } })).statusCode)); assert.equal(x.sent.length, 0);
   }
 });
 test("S2 enforced expired plan cannot email reports", async () => {
@@ -126,11 +126,16 @@ test("S2 actual scheduler processUser sends owned report through direct helper",
   const start = source.indexOf("async function processUser("), end = source.indexOf("async function run()", start);
   const context = vm.createContext({
     console: { log() {}, warn() {}, error() {} }, Date, process: { env: { RESEND_API_KEY: "isolated" } },
+    verified: u => Boolean(u.emailVerifiedAt && u.authVersion && u.active !== false),
     ensureTrial: async () => {}, getEntitlements: () => ({ enforced: true, canRunMonitoring: true }),
     generateDailyIntelligence: async () => ({ reportId, userEmail: "owner@example.com", findings: [] }),
     sendWatchdogEmail: x.handler.sendWatchdogEmail,
   });
   vm.runInContext(source.slice(start, end), context);
+  for (const denied of [user({emailVerifiedAt:undefined}),user({configurationReviewRequired:true})]) {
+    const skipped = await context.processUser(denied,x.db,"2026-10-28"); assert.equal(skipped.reason,"ownership_or_review_required");
+  }
+  assert.equal(x.sent.length,0);
   const result = await context.processUser(user(), x.db, "2026-10-28");
   assert.equal(result.status, "success"); assert.equal(result.emailSent, true); assert.equal(x.sent.length, 1);
   assert.deepEqual(x.sent[0].payload.to, ["owner@example.com"]);

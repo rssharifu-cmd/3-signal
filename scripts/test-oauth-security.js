@@ -2,12 +2,12 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const jwt = require("jsonwebtoken");
 const { mockDb, loader, call, user, response } = require("./test-helpers/securityHarness");
-function setup({ db: supplied, rejectProvider = false, owner = user() } = {}) {
+function setup({ db: supplied, rejectProvider = false, omitRefresh = false, owner = user() } = {}) {
   const db = supplied || mockDb({ users: owner ? [owner] : [] }); const exchanges = [];
   const handler = loader({ db, fetchFn: async (url, options) => {
     if (url.endsWith("/token")) {
       exchanges.push({ url, options });
-      return response(rejectProvider ? { error: "invalid_grant" } : { access_token: "mock-access", refresh_token: "mock-refresh", scope: "openid email profile https://www.googleapis.com/auth/analytics.readonly" }, !rejectProvider);
+      return response(rejectProvider ? { error: "invalid_grant" } : { access_token: "mock-access", ...(omitRefresh ? {} : { refresh_token: "mock-refresh" }), scope: "openid email profile https://www.googleapis.com/auth/analytics.readonly" }, !rejectProvider);
     }
     if (url.endsWith("/userinfo")) return response({ email: "provider@example.com" });
     throw new Error("Unexpected isolated provider URL");
@@ -29,7 +29,7 @@ test("S4 Bing matched state and cookie succeeds and stores encrypted refresh tok
   assert.equal(res.statusCode, 200); assert.equal(x.exchanges.length, 1); assert.match(res.body, /OAUTH_AUTH_SUCCESS/);
   const connection = x.db.data.datasources.find((d) => d.provider === "bing_webmaster");
   assert.equal(connection.userEmail, user().email); assert.notEqual(connection.encryptedRefreshToken, "mock-refresh");
-  assert.equal(x.db.data.oauth_pending.length, 0);
+  assert.equal(x.db.data.oauth_attempts.length, 0);
 });
 test("S4 Bing cookie-only callback succeeds; Google requires returned state", async () => {
   const x = setup(), flow = await begin(x); assert.equal((await call(x.handler, callback(null, flow.cookie))).statusCode, 200);
@@ -44,7 +44,7 @@ test("S4 Google valid callback and already-authorized direct connection remain s
 test("S4 no browser cookie cannot claim the sole global pending attempt", async () => {
   const x = setup(), flow = await begin(x);
   for (const state of [null, flow.state]) assert.equal((await call(x.handler, callback(state, null))).statusCode, 400);
-  assert.equal(x.exchanges.length, 0); assert.equal(x.db.data.oauth_pending.length, 1);
+  assert.equal(x.exchanges.length, 0); assert.equal(x.db.data.oauth_attempts.length, 1);
 });
 test("S4 mismatched browser state cannot claim another browser attempt", async () => {
   const x = setup(), a = await begin(x), b = await begin(x);
@@ -69,7 +69,7 @@ test("S4 missing/exhausted pending state and parallel replay never exchange twic
   assert.equal((await call(x.handler, callback(f.state, f.cookie))).statusCode, 400);
 });
 test("S4 expired pending record denied even with valid signed state", async () => {
-  const x = setup(), f = await begin(x); x.db.data.oauth_pending[0].expiresAt = new Date(0);
+  const x = setup(), f = await begin(x); x.db.data.oauth_attempts[0].expiresAt = new Date(0);
   assert.equal((await call(x.handler, callback(f.state, f.cookie))).statusCode, 400); assert.equal(x.exchanges.length, 0);
 });
 test("S4 pending persistence/claim failure fails closed", async () => {
@@ -82,18 +82,18 @@ test("S4 pending persistence/claim failure fails closed", async () => {
 test("S4 cancellation consumes pending attempt without token exchange", async () => {
   const x = setup(), f = await begin(x);
   const res = await call(x.handler, callback(f.state, f.cookie, { url: "/api/oauth-callback?error=access_denied&state=" + f.state }));
-  assert.equal(res.statusCode, 400); assert.equal(x.exchanges.length, 0); assert.equal(x.db.data.oauth_pending.length, 0);
+  assert.equal(res.statusCode, 400); assert.equal(x.exchanges.length, 0); assert.equal(x.db.data.oauth_attempts.length, 0);
 });
 test("S4 provider failure consumes attempt and requires restart", async () => {
   const x = setup({ rejectProvider: true }), f = await begin(x);
   assert.equal((await call(x.handler, callback(f.state, f.cookie))).statusCode, 500);
   assert.equal((await call(x.handler, callback(f.state, f.cookie))).statusCode, 400); assert.equal(x.exchanges.length, 1);
 });
-test("S4 production apex/www cookie has matching domain on creation and clearing", async () => {
+test("S4 production cookie is host-only on creation and clearing", async () => {
   const x = setup(), f = await begin(x, "bing_webmaster", "www.sharflow.online");
-  assert.match(f.res.headers["Set-Cookie"], /Domain=sharflow.online/); assert.match(f.res.headers["Set-Cookie"], /Secure/);
+  assert.doesNotMatch(f.res.headers["Set-Cookie"], /Domain=/); assert.match(f.res.headers["Set-Cookie"], /Secure/);
   const res = await call(x.handler, callback(f.state, f.cookie));
-  assert.match(res.headers["Set-Cookie"], /Domain=sharflow.online/); assert.match(res.headers["Set-Cookie"], /Max-Age=0/);
+  assert.doesNotMatch(res.headers["Set-Cookie"], /Domain=/); assert.match(res.headers["Set-Cookie"], /Max-Age=0/);
 });
 test("S4 malformed/repeated callback parameters and unsupported provider are rejected", async () => {
   const x = setup(), f = await begin(x);
@@ -106,4 +106,16 @@ test("S4 legacy cookies cannot replace the new browser-bound attempt", async () 
   const legacy = "sharflow_oauth_state=" + f.state;
   assert.equal((await call(x.handler, callback(f.state, legacy))).statusCode, 400);
   assert.equal((await call(x.handler, callback(f.state, legacy + "; " + f.cookie))).statusCode, 200);
+});
+
+test('ownership reauthorization cannot adopt old Google token when provider omits refresh token', async()=>{
+ const owner=user({integrationResetAt:new Date()});
+ const db=mockDb({users:[owner],datasources:[{userEmail:owner.email,provider:'google_analytics',encryptedRefreshToken:'old-unsafe-token',status:'connected'}]});
+ const x=setup({db,owner,omitRefresh:true}),f=await begin(x,'google_analytics');const r=await call(x.handler,callback(f.state,f.cookie));
+ assert.equal(r.statusCode,400);assert.equal(db.data.datasources[0].ownershipVerifiedAt,undefined);
+});
+test('fresh ownership OAuth resets old property selection before monitoring resumes',async()=>{
+ const owner=user({integrationResetAt:new Date(Date.now()-1000)});const db=mockDb({users:[owner],datasources:[{userEmail:owner.email,provider:'bing_webmaster',selectedProperty:{id:'old-site'},encryptedRefreshToken:'old'}]});
+ const x=setup({db,owner}),f=await begin(x);assert.equal((await call(x.handler,callback(f.state,f.cookie))).statusCode,200);
+ assert.equal(db.data.datasources[0].selectedProperty,null);assert.ok(db.data.datasources[0].ownershipVerifiedAt>=owner.integrationResetAt);
 });

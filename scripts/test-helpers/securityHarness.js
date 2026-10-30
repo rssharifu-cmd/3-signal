@@ -28,6 +28,7 @@ function matches(doc, query) {
         if (op === "$ne") return !equal(val, arg);
         if (op === "$exists") return (val !== undefined) === arg;
         if (op === "$lte") return val !== undefined && val <= arg;
+        if (op === "$gte") return val !== undefined && val >= arg;
         if (op === "$gt") return val !== undefined && val > arg;
         throw new Error("Unsupported mock query operator: " + op);
       });
@@ -60,7 +61,7 @@ function mockDb(initial = {}) {
       async insertOne(doc) {
         calls.push({ name, op: "insertOne" });
         const copy = clone(doc); copy._id ||= "fixture-" + rows.length;
-        if (rows.some((r) => equal(r._id, copy._id))) throw Object.assign(new Error("duplicate fixture ID"), { code: 11000 });
+        if (rows.some((r) => equal(r._id, copy._id))) throw Object.assign(new Error("duplicate fixture ID"), { code: 11000, keyPattern: { _id: 1 } });
         rows.push(copy); return { insertedId: copy._id };
       },
       async updateOne(query, update, options = {}) {
@@ -69,13 +70,22 @@ function mockDb(initial = {}) {
         if (!row && options.upsert) {
           row = Object.fromEntries(Object.entries(query).filter(([, v]) => typeof v !== "object" || v === null));
           row._id ||= "fixture-" + rows.length;
-          if (rows.some((r) => equal(r._id, row._id))) throw Object.assign(new Error("duplicate fixture ID"), { code: 11000 });
+          if (rows.some((r) => equal(r._id, row._id))) throw Object.assign(new Error("duplicate fixture ID"), { code: 11000, keyPattern: { _id: 1 } });
           inserted = true; rows.push(row); set(row, update.$setOnInsert);
         }
-        if (row) set(row, update.$set);
+        if (row) {
+ set(row, update.$set);
+ for (const [key,val] of Object.entries(update.$inc || {})) row[key]=(row[key] || 0)+val;
+ for (const key of Object.keys(update.$unset || {})) delete row[key];
+}
         return { matchedCount: row && !inserted ? 1 : 0, upsertedCount: inserted ? 1 : 0 };
       },
-      async findOneAndDelete(query) {
+      async findOneAndUpdate(query, update, options={}) {
+ const result = await this.updateOne(query,update,options);
+ if (!result.matchedCount && !result.upsertedCount) return null;
+ return this.findOne(options.upsert ? {_id:query._id} : query._id ? {_id:query._id} : query);
+},
+async findOneAndDelete(query) {
         calls.push({ name, op: "findOneAndDelete", query });
         const index = rows.findIndex((r) => matches(r, query));
         return index < 0 ? null : clone(rows.splice(index, 1)[0]);
@@ -108,10 +118,10 @@ function loader({ db, overrides = {}, fetchFn } = {}) {
   return load;
 }
 function token(email = "owner@example.com", extra = {}, options = {}) {
-  return jwt.sign({ email, ...extra }, process.env.JWT_SECRET, { expiresIn: "1h", ...options });
+  return jwt.sign({ email, purpose: "session", av: "fixture-version", ...extra }, process.env.JWT_SECRET, { expiresIn: "1h", ...options });
 }
 function request({ method = "POST", url = "/api/test", body = {}, email = "owner@example.com", bearer, headers = {}, query = {} } = {}) {
-  return { method, url, body, query, headers: { host: "sharflow.online", ...(email ? { authorization: "Bearer " + (bearer || token(email)) } : {}), ...headers } };
+  return { method, url, body, query, socket: {remoteAddress:"127.0.0.1"}, headers: { host: "sharflow.online", ...(email ? { authorization: "Bearer " + (bearer || token(email)) } : {}), ...headers } };
 }
 async function call(handler, options) {
   const res = { statusCode: 200, headers: {}, body: null,
@@ -125,7 +135,7 @@ async function call(handler, options) {
 }
 function user(extra = {}) {
   return { _id: "111111111111111111111111", email: "owner@example.com", name: "Owner",
-    active: true, trialEndsAt: new Date(Date.now() + 86400000),
+    emailVerifiedAt: new Date(), authVersion: "fixture-version", active: true, trialEndsAt: new Date(Date.now() + 86400000),
     profile: { websiteUrl: "https://store.example", summary: "Saved profile" }, ...extra };
 }
 function response(data, ok = true) { return { ok, status: ok ? 200 : 400, json: async () => data }; }

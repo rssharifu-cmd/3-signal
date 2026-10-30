@@ -1,3 +1,4 @@
+const { requireAccount, verified } = require("./_lib/accountSecurity");
 /**
  * Sharflow — Watchdog Daily Intelligence Review & Debug API
  *
@@ -17,20 +18,16 @@ const { cors, extractEmail } = require("./_lib/authMiddleware");
 const { getEntitlements } = require("./_lib/plans");
 
 module.exports = async function handler(req, res) {
-  cors(req, res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
   if (!["GET", "POST"].includes(req.method)) return res.status(405).json({ error: "Method not allowed." });
 
   const urlObj = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
   // 1. Require a valid authenticated session
-  const authedEmail = extractEmail(req);
-  if (!authedEmail) {
-    return res.status(401).json({
-      ok: false,
-      error: "Unauthorized: Missing or invalid JWT session token.",
-    });
-  }
+  const authenticatedUser = await requireAccount(req, res, { allowReview: false });
+  if (!authenticatedUser) return;
+  const authedEmail = authenticatedUser.email;
 
   // 2. Authorize admin check
   const rawAdminEmails = process.env.ADMIN_EMAILS || "";
@@ -96,6 +93,7 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: "Conflicting target identifiers." });
       }
     }
+    if (!verified(targetAccount) || targetAccount.configurationReviewRequired) return res.status(403).json({error:"Verified target account required."});
     const targetUser = targetAccount.email;
     const entitlements = getEntitlements(targetAccount);
 

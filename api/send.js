@@ -1,3 +1,4 @@
+const { requireAccount, verified } = require("./_lib/accountSecurity");
 /**
  * Vercel Node.js Serverless — POST /api/send
  *
@@ -18,11 +19,7 @@ const { getEntitlements } = require("./_lib/plans");
 const { extractEmail } = require("./_lib/authMiddleware");
 const { claimEmailSend } = require("./_lib/emailSendGuard");
 
-function cors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
+const { cors } = require("./_lib/authMiddleware");
 
 function parseBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
@@ -536,13 +533,11 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
   if (typeof report.userEmail !== "string" || report.userEmail.toLowerCase() !== toEmail.toLowerCase()) {
     throw new Error("Report recipient does not match report owner.");
   }
-  let resolvedEntitlements = entitlements || null;
-  if (!resolvedEntitlements) {
-    const db = await getDb();
-    const user = await db.collection("users").findOne({ email: toEmail.toLowerCase() });
-    if (!user) throw new Error("Report owner not found.");
-    resolvedEntitlements = getEntitlements(user);
-  }
+  const ownerDb = await getDb();
+  const owner = await ownerDb.collection("users").findOne({ email: toEmail.toLowerCase() });
+  if (!verified(owner) || owner.configurationReviewRequired) throw new Error("Verified report owner required.");
+  if (process.env.EMAIL_DELIVERY_MODE !== "resend") throw new Error("Email delivery is disabled.");
+  let resolvedEntitlements = getEntitlements(owner);
   if (resolvedEntitlements.enforced && !resolvedEntitlements.canRunMonitoring) {
     throw new Error("An active monitoring plan is required.");
   }
@@ -575,7 +570,7 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
 
 // ── HTTP HANDLER ─────────────────────────────────────────────────────────────
 async function handler(req, res) {
-  cors(res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
 
   if (req.method === "GET") {
@@ -584,8 +579,9 @@ async function handler(req, res) {
 
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-  const email = extractEmail(req);
-  if (!email) return res.status(401).json({ error: "Unauthorized. Please sign in." });
+  const authenticatedUser = await requireAccount(req, res);
+  if (!authenticatedUser) return;
+  const email = authenticatedUser.email;
 
   try {
     const body = parseBody(req);
@@ -619,7 +615,7 @@ async function handler(req, res) {
         return res.status(403).json({ error: "plan_required", message: "Choose a plan to continue." });
       }
     }
-    if (!(process.env.RESEND_API_KEY || "").trim()) {
+    if (process.env.EMAIL_DELIVERY_MODE !== "resend" || !(process.env.RESEND_API_KEY || "").trim()) {
       return res.status(503).json({ error: "Email delivery is unavailable." });
     }
     const claim = await claimEmailSend(db, user._id);
@@ -635,6 +631,8 @@ async function handler(req, res) {
         idempotencyKey: claim.idempotencyKey,
       });
     } else {
+      try { await db.collection("email_send_guards").insertOne({ _id: "welcome:" + String(user._id), requestedAt: new Date() }, { writeConcern: { w: "majority", wtimeoutMS: 5000 } }); }
+      catch (err) { if (err.code !== 11000 || !err.keyPattern?._id) throw err; return res.status(200).json({ ok: true, alreadyRequested: true }); }
       const html = welcomeHtml({
         name: user.name || "", email: user.email,
         websiteUrl: user.profile.websiteUrl, profileSummary: user.profile.summary || "",

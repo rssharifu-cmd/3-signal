@@ -1,66 +1,48 @@
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const { mockDb, loader, call, user, token } = require("./test-helpers/securityHarness");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-
-for (const fixture of [{ passwordHash: "", googleSub: "verified-google" }, { passwordHash: "" }, { passwordHash: "existing-hash" }]) {
-  test("S1 existing account signup cannot set password: " + JSON.stringify(fixture), async () => {
-    const existing = user(fixture), db = mockDb({ users: [existing] });
-    const res = await call(loader({ db })("api/auth.js"), { body: { action: "signup", email: " OWNER@EXAMPLE.COM ", password: "attacker-password", name: "Attacker" } });
-    assert.equal(res.statusCode, 409); assert.equal(res.body.token, undefined);
-    assert.deepEqual(db.data.users, [existing]);
-    assert.equal(db.calls.filter((c) => c.op !== "findOne").length, 0);
-  });
-}
-test("S1 new signup, correct password login, wrong password denial and session verification", async () => {
-  const db = mockDb(); const auth = loader({ db })("api/auth.js");
-  const signup = await call(auth, { body: { action: "signup", email: "new@example.com", password: "safe-test-password", name: "New" } });
-  assert.equal(signup.statusCode, 201); assert.equal(signup.body.user.passwordHash, undefined);
-  assert.equal(jwt.verify(signup.body.token, process.env.JWT_SECRET).purpose, "session");
-  assert.ok(await bcrypt.compare("safe-test-password", db.data.users[0].passwordHash));
-  const login = await call(auth, { body: { action: "login", email: "new@example.com", password: "safe-test-password" } });
-  assert.equal(login.statusCode, 200);
-  const wrong = await call(auth, { body: { action: "login", email: "new@example.com", password: "wrong-password" } });
-  assert.equal(wrong.statusCode, 401);
-  const verify = await call(auth, { method: "GET", bearer: login.body.token }); assert.equal(verify.statusCode, 200);
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const bcrypt=require('bcryptjs');
+const {mockDb,loader,call,user,token,response}=require('./test-helpers/securityHarness');
+function setup(initial={}) { const db=mockDb(initial),sent=[];const load=loader({db,fetchFn:async(url,options)=>{sent.push(JSON.parse(options.body));return response({id:'mock'});}}); return {db,sent,load,auth:load('api/auth.js')}; }
+const post=(action,extra={})=>({email:null,body:{action,email:'owner@example.com',...extra}});
+for (const passwordHash of ['', 'existing-hash']) test('S1 verified signup cannot replace password '+passwordHash,async()=>{
+ const existing=user({passwordHash}),x=setup({users:[existing]});const r=await call(x.auth,post('signup',{password:'attacker-password'}));
+ assert.equal(r.statusCode,202);assert.equal(r.body.token,undefined);assert.deepEqual(x.db.data.users,[existing]);assert.equal(x.sent.length,0);
 });
-test("S1 Google-only login directs to Google, legacy passwordless directs to support", async () => {
-  for (const extra of [{ passwordHash: "", googleSub: "google" }, { passwordHash: "" }]) {
-    const res = await call(loader({ db: mockDb({ users: [user(extra)] }) })("api/auth.js"), { body: { action: "login", email: "owner@example.com", password: "unused-password" } });
-    assert.equal(res.statusCode, 401); assert.doesNotMatch(res.body.error, /Create account/);
-    assert.match(res.body.error, extra.googleSub ? /sign in with Google/ : /recovery assistance/);
-  }
+test('pending signup sends fixed email, stores only hash, password set after single-use verification',async()=>{
+ const x=setup(); const r=await call(x.auth,post('signup',{password:'attacker-password',html:'arbitrary'}));assert.equal(r.statusCode,202);assert.equal(r.body.token,undefined);
+ const u=x.db.data.users[0];assert.equal(u.passwordHash,'');assert.equal(x.sent.length,1);assert.deepEqual(x.sent[0].to,['owner@example.com']);assert.equal(x.sent[0].html,undefined);
+ const raw=x.sent[0].text.match(/#verify=([a-f0-9]{64})/)[1];assert.notEqual(u.verification.hash,raw);
+ const done=await call(x.auth,post('complete_verification',{token:raw,password:'new strong password'}));assert.equal(done.statusCode,200);assert.ok(await bcrypt.compare('new strong password',u.passwordHash));assert.equal(u.verification,undefined);
+ assert.equal((await call(x.auth,post('complete_verification',{token:raw,password:'different password'}))).statusCode,400);
+ assert.equal((await call(x.auth,post('login',{password:'new strong password'}))).statusCode,200);
+ assert.equal((await call(x.auth,post('login',{password:'wrong password'}))).statusCode,401);
+ assert.equal((await call(x.auth,{method:'GET',bearer:done.body.token})).statusCode,200);
 });
-test("S1 verified Google sign-in preserves existing profile and password", async () => {
-  const existing = user({ passwordHash: "preserved-hash" }), db = mockDb({ users: [existing] });
-  class OAuth2Client { async verifyIdToken() { return { getPayload: () => ({ email: existing.email, email_verified: true, sub: "google-sub", name: "Google name" }) }; } }
-  const res = await call(loader({ db, overrides: { "google-auth-library": { OAuth2Client } } })("api/auth.js"), { body: { action: "google", credential: "mock-google-credential" } });
-  assert.equal(res.statusCode, 200); assert.ok(res.body.token);
-  assert.deepEqual(db.data.users[0].profile, existing.profile);
-  assert.equal(db.data.users[0].passwordHash, "preserved-hash"); assert.equal(db.data.users[0].authProvider, "both");
+test('expired and weak-password verification cannot activate account',async()=>{
+ const x=setup();await call(x.auth,post('signup'));const raw=x.sent[0].text.match(/#verify=([a-f0-9]{64})/)[1];
+ assert.equal((await call(x.auth,post('complete_verification',{token:raw,password:'short'}))).statusCode,400);
+ x.db.data.users[0].verification.expiresAt=new Date(0);
+ assert.equal((await call(x.auth,post('complete_verification',{token:raw,password:'long enough password'}))).statusCode,400);assert.equal(x.db.data.users[0].emailVerifiedAt,undefined);
 });
-test("S1 unverified Google identity is denied", async () => {
-  const db = mockDb();
-  class OAuth2Client { async verifyIdToken() { return { getPayload: () => ({ email: "owner@example.com", email_verified: false }) }; } }
-  const res = await call(loader({ db, overrides: { "google-auth-library": { OAuth2Client } } })("api/auth.js"), { body: { action: "google", credential: "mock" } });
-  assert.equal(res.statusCode, 401); assert.equal(db.calls.length, 0);
+test('signup address limits and cooldown block repeated delivery and fail closed',async()=>{
+ const x=setup();assert.equal((await call(x.auth,post('signup'))).statusCode,202);assert.equal((await call(x.auth,post('signup'))).statusCode,429);assert.equal(x.sent.length,1);
+ const bad=loader({db:{collection(){throw Error('unavailable');}}})('api/auth.js');assert.equal((await call(bad,post('login',{password:'test'}))).statusCode,503);
 });
-test("Session purpose checks reject OAuth/checkout tokens and retain legacy login sessions", async () => {
-  const db = mockDb({ users: [user()] }); const load = loader({ db });
-  for (const purpose of ["oauth_state", "paddle_checkout_link"]) {
-    for (const file of ["api/auth.js", "api/user.js"]) {
-      const res = await call(load(file), { method: "GET", bearer: token("owner@example.com", { purpose }) });
-      assert.equal(res.statusCode, 401, file + " " + purpose);
-    }
-  }
-  for (const file of ["api/auth.js", "api/user.js"]) assert.equal((await call(load(file), { method: "GET" })).statusCode, 200);
+test('unverified accounts and legacy/stale/wrong-purpose sessions denied across protected routes',async()=>{
+ const old=user({emailVerifiedAt:undefined,authVersion:undefined});const x=setup({users:[old]});
+ for(const file of ['api/auth.js','api/user.js','api/send.js','api/watchdog.js','api/datasources.js','api/admin-status.js']) assert.equal((await call(x.load(file),{method:file==='api/send.js'?'POST':'GET'})).statusCode,401,file);
+ const good=setup({users:[user()]});
+ for(const extra of [{purpose:undefined,av:undefined},{purpose:'oauth_state'},{purpose:'paddle_checkout_link'},{av:'stale'}]) assert.equal((await call(good.auth,{method:'GET',bearer:token(undefined,extra)})).statusCode,401);
+ assert.equal((await call(good.auth,{method:'GET'})).statusCode,200);
 });
-test("Legacy OAuth state without purpose cannot be reused as a login session", async () => {
-  const load = loader({ db: mockDb({ users: [user()] }) });
-  const state = token(undefined, { provider: "bing_webmaster", nonce: "old-state", redirectUri: "https://sharflow.online/api/oauth-callback" });
-  for (const file of ["api/user.js", "api/send.js", "api/watchdog.js"]) {
-    assert.equal((await call(load(file), { method: "POST", bearer: state, body: { action: "welcome" } })).statusCode, 401);
-  }
-  assert.equal((await call(load("api/auth.js"), { method: "GET", bearer: state })).statusCode, 401);
+for(const claiming of [true,false]) test('verified Google claim '+claiming+' preserves profile and invalidates unsafe credentials',async()=>{
+ const existing=user({passwordHash:'existing-hash',...(claiming?{emailVerifiedAt:undefined,authVersion:undefined}:{})}),db=mockDb({users:[existing]});
+ class OAuth2Client {async verifyIdToken(){return {getPayload:()=>({email:existing.email,email_verified:true,sub:'google-sub',name:'Owner'})};}}
+ const auth=loader({db,overrides:{'google-auth-library':{OAuth2Client}}})('api/auth.js'); const r=await call(auth,post('google',{credential:'mock'}));assert.equal(r.statusCode,200);
+ const u=db.data.users[0];assert.deepEqual(u.profile,existing.profile);assert.equal(u.passwordHash,claiming?'':'existing-hash');assert.equal(Boolean(u.configurationReviewRequired),claiming);
+ if(claiming) assert.notEqual(u.authVersion,'fixture-version');else assert.equal(u.authVersion,'fixture-version');
+});
+test('unverified Google identity rejected before user mutation',async()=>{
+ const db=mockDb();class OAuth2Client{async verifyIdToken(){return {getPayload:()=>({email:'owner@example.com',email_verified:false,sub:'sub'})};}}
+ const r=await call(loader({db,overrides:{'google-auth-library':{OAuth2Client}}})('api/auth.js'),post('google',{credential:'mock'}));assert.equal(r.statusCode,401);assert.equal((db.data.users||[]).length,0);
 });

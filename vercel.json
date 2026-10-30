@@ -30,6 +30,7 @@
       ]
     }
   ],
+  "redirects": [{ "source": "/:path*", "has": [{ "type": "host", "value": "www.sharflow.online" }], "destination": "https://sharflow.online/:path*", "permanent": true }],
   "rewrites": [
     { "source": "/api/auth", "destination": "/api/auth.js" },
     { "source": "/api/datasources", "destination": "/api/datasources.js" },

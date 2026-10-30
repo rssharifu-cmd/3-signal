@@ -1,3 +1,4 @@
+const { requireAccount } = require("./_lib/accountSecurity");
 /**
  * Vercel Node.js Serverless — /api/user
  *
@@ -13,11 +14,7 @@ const { getDb } = require("./_lib/db");
 const { extractEmail } = require("./_lib/authMiddleware");
 const { getEntitlements, ensureTrial, TRIAL_DAYS } = require("./_lib/plans");
 
-function cors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
+const { cors } = require("./_lib/authMiddleware");
 
 function parseBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
@@ -25,21 +22,15 @@ function parseBody(req) {
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
 }
 
-function safeUser(user) {
-  if (!user) return user;
-  const { passwordHash, ...rest } = user;
-  const entitlements = getEntitlements(user);
-  return { ...rest, entitlements };
-}
+const { publicUser: safeUser } = require("./_lib/accountSecurity");
 
 async function handler(req, res) {
-  cors(res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
 
-  const email = extractEmail(req);
-  if (!email) {
-    return res.status(401).json({ error: "Unauthorized. Please log in." });
-  }
+  const authenticatedUser = await requireAccount(req, res, { allowReview: true });
+  if (!authenticatedUser) return;
+  const email = authenticatedUser.email;
 
   try {
     const db = await getDb();
@@ -51,34 +42,8 @@ async function handler(req, res) {
     const now = new Date();
 
     if (req.method === "GET") {
-      let user = await users.findOne({ email });
-      if (!user) {
-        const trialStartedAt = now;
-        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-        user = {
-          email,
-          name: email.split("@")[0] || "User",
-          passwordHash: "",
-          plan: "starter",
-          trialStartedAt,
-          trialEndsAt,
-          active: true,
-          profile: null,
-          settings: {
-            notifications: true,
-            digestTime: "08:00",
-            timezone: "UTC",
-            digestFrequency: "daily",
-            alertThreshold: "all",
-          },
-          createdAt: now,
-          updatedAt: now,
-        };
-        await users.insertOne(user);
-      } else if (!user.trialEndsAt) {
-        user = await ensureTrial(db, user, now);
-      }
-
+      const user = authenticatedUser;
+      if (user.configurationReviewRequired && queryAction === "checkout_token") return res.status(403).json({ error: "profile_review_required" });
       if (queryAction === "checkout_token") {
         const secret = (process.env.JWT_SECRET || "").trim();
         if (!secret) {
@@ -116,28 +81,8 @@ async function handler(req, res) {
     if (req.method === "POST") {
       const body = parseBody(req);
 
-      let user = await users.findOne({ email });
-      if (!user) {
-        user = {
-          email,
-          name: email.split("@")[0] || "User",
-          passwordHash: "",
-          plan: "starter",
-          active: true,
-          profile: null,
-          settings: {
-            notifications: true,
-            digestTime: "08:00",
-            timezone: "UTC",
-            digestFrequency: "daily",
-            alertThreshold: "all",
-          },
-          createdAt: now,
-          updatedAt: now,
-        };
-        await users.insertOne(user);
-      }
-
+      const user = authenticatedUser;
+      if (user.configurationReviewRequired && body.action === "checkout_token") return res.status(403).json({ error: "profile_review_required" });
       if (body.action === "checkout_token") {
         const secret = (process.env.JWT_SECRET || "").trim();
         if (!secret) {
@@ -223,6 +168,7 @@ async function handler(req, res) {
           savedAt: now,
         };
         update.$set.profile = profile;
+        if (body.reviewConfirmed === true) update.$set.configurationReviewRequired = false;
       }
 
       // ── SAVE Watchdog Settings ──────────────────────────────────────────────

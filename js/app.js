@@ -137,6 +137,7 @@ function applyUserToLocalState(user, entitlements = null) {
 }
 
 function routeAfterAuth(user) {
+  if (user?.configurationReviewRequired) { showOnboarding(); toast("Review your account settings, then reconnect your integrations."); return false; }
   const prof = user?.profile?.summary || localStorage.getItem(STORAGE.profile);
   if (prof) {
     const lockRaw = user?.profile?.lockedUntil || localStorage.getItem(STORAGE.lock);
@@ -628,7 +629,12 @@ function openAuthModal(tab = "signup") {
   initGoogleSignIn();
 }
 
+let verificationSignupMarkup = null;
 function closeAuthModal() {
+  if (verificationSignupMarkup !== null) {
+    document.getElementById("auth-signup-form").innerHTML = verificationSignupMarkup;
+    verificationSignupMarkup = null; verificationSetupActive = false;
+  }
   document.getElementById("auth-modal").classList.remove("open");
 }
 
@@ -639,57 +645,44 @@ function switchAuthTab(tab) {
   document.getElementById("tab-login").classList.toggle("active", tab === "login");
 }
 
-async function handleSignup() {
-  const name = document.getElementById("auth-name").value.trim();
-  const email = document.getElementById("auth-email").value.trim();
-  const pass = document.getElementById("auth-pass").value.trim();
-  if (!name || !email || !pass) {
-    toast("Please fill in all fields.");
-    return;
-  }
-  if (pass.length < 6) {
-    toast("Password must be at least 6 characters.");
-    return;
-  }
-
-  const btn = document.querySelector("#auth-signup-form .btn-primary");
-  btn.disabled = true;
-  btn.textContent = "Creating account…";
-
-  try {
-    const res = await fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "signup", email, password: pass, name }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      toast(data.error || "Signup failed");
-      return;
-    }
-    localStorage.setItem(STORAGE.token, data.token);
-    localStorage.setItem(STORAGE.email, email);
-    localStorage.setItem(STORAGE.userName, name);
-    const form = getSavedForm();
-    form.name = name;
-    localStorage.setItem(STORAGE.profileForm, JSON.stringify(form));
-    document.getElementById("pf-name").value = name;
-    if (data.user) {
-      applyUserToLocalState(data.user);
-    }
-    closeAuthModal();
-    showOnboarding();
-  } catch {
-    toast("Network error — try again.");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Create Account →";
-  }
+async function requestEmailVerification(email) {
+ const res=await fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"request_verification",email})});
+ const data=await res.json(); toast(res.ok ? "If eligible, a verification link has been sent. Check your inbox." : data.error || "Please try again later.");
 }
+async function handleSignup() {
+ const email=document.getElementById("auth-email").value.trim();
+ if (!email) return toast("Please enter your email address.");
+ const btn=document.querySelector("#auth-signup-form .btn-primary"); btn.disabled=true;
+ try { await requestEmailVerification(email); } catch {toast("Network error — try again.");} finally {btn.disabled=false;}
+}
+let verificationSetupActive = false;
+async function showVerificationSetup() {
+ const match=window.location.hash.match(/^#verify=([a-f0-9]{64})$/);
+ if (!match) return;
+ verificationSetupActive = true;
+ const verificationToken=match[1]; history.replaceState(null,"",window.location.pathname+window.location.search);
+ openAuthModal("signup");
+ const form=document.getElementById("auth-signup-form");
+ verificationSignupMarkup = form.innerHTML;
+ form.innerHTML='<p>Choose a password to finish verifying your email. Use at least 12 characters (maximum 72 UTF-8 bytes).</p><label for="verification-password">New password</label><input id="verification-password" type="password" autocomplete="new-password" minlength="12" required><button type="button" class="btn-primary">Verify and continue</button>';
+ const button=form.querySelector("button");
+ button.onclick=async()=>{
+  const password=document.getElementById("verification-password").value;
+  if(password.length<12 || new TextEncoder().encode(password).length>72) return toast("Use 12 or more characters, within 72 bytes.");
+  button.disabled=true;
+  try {
+   const res=await fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"complete_verification",token:verificationToken,password})});
+   const data=await res.json(); if(!res.ok) return toast(data.error || "Link expired. Request a new verification email.");
+   localStorage.setItem(STORAGE.token,data.token); localStorage.setItem(STORAGE.email,data.user.email);
+   applyUserToLocalState(data.user); closeAuthModal(); routeAfterAuth(data.user);
+  } catch {toast("Network error — try again.");} finally {button.disabled=false;}
+ };
+}
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",showVerificationSetup); else setTimeout(showVerificationSetup,0);
 
 async function handleLogin() {
   const email = document.getElementById("login-email").value.trim();
-  const pass = document.getElementById("login-pass").value.trim();
+  const pass = document.getElementById("login-pass").value;
   if (!email || !pass) {
     toast("Please enter email and password.");
     return;
@@ -707,7 +700,12 @@ async function handleLogin() {
     });
     const data = await res.json();
     if (!res.ok) {
-      toast(data.error || "Login failed");
+      if (res.status === 401) {
+        toast("Verify your email or sign in with Google.");
+        let recovery = document.getElementById("request-verification");
+        if (!recovery) { recovery = document.createElement("button"); recovery.id="request-verification"; recovery.type="button"; recovery.textContent="Send verification link"; document.getElementById("auth-login-form").appendChild(recovery); }
+        recovery.onclick = async () => { recovery.disabled=true; try {await requestEmailVerification(email);} catch {toast("Please try again later.");} finally {recovery.disabled=false;} };
+      } else toast(data.error || "Login failed");
       return;
     }
 
@@ -1391,6 +1389,7 @@ async function submitWebsiteOnboarding() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
+          reviewConfirmed: true,
           name: form.name,
           plan: localStorage.getItem(STORAGE.plan) || "starter",
           profile: {
@@ -2694,6 +2693,7 @@ function resetAll() {
 }
 
 window.onload = async () => {
+  if (verificationSetupActive) return;
   // Check if returning from a Paddle checkout
   try {
     const urlParams = new URLSearchParams(window.location.search);
@@ -3178,6 +3178,7 @@ function updateOverviewSourcesSummary(sources) {
   }
 }
 
+let pendingOAuthPopup = null;
 async function initiateOAuth(provider) {
   const token = localStorage.getItem(STORAGE.token);
   if (!token) {
@@ -3201,6 +3202,7 @@ async function initiateOAuth(provider) {
       "sharflow_oauth_window",
       "width=600,height=720,menubar=no,toolbar=no,status=no,location=yes,scrollbars=yes,resizable=yes"
     );
+    pendingOAuthPopup = popup;
     if (popup) {
       try {
         const providerName = provider === "bing_webmaster" ? "Bing Webmaster Tools" : provider === "google_analytics" ? "Google Analytics" : "Google Search Console";
@@ -3418,20 +3420,7 @@ async function disconnectDataSource(provider) {
 
 // Global OAuth popup message listener
 window.addEventListener("message", async (event) => {
-  // Validate sender origin matches current window origin or trusted Sharflow domain
-  const origin = event.origin || "";
-  const isTrusted =
-    origin === window.location.origin ||
-    origin === "https://sharflow.online" ||
-    origin === "https://www.sharflow.online" ||
-    origin === "https://sharflow.com" ||
-    origin === "https://www.sharflow.com" ||
-    origin.endsWith(".run.app") ||
-    origin.endsWith(".vercel.app") ||
-    origin.includes("localhost") ||
-    origin.includes("127.0.0.1");
-
-  if (!isTrusted) return;
+  if (event.origin !== window.location.origin || !pendingOAuthPopup || event.source !== pendingOAuthPopup) return;
 
   if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
     toast("Authorization successful! Loading available properties…");

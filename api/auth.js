@@ -1,323 +1,90 @@
-/**
- * Vercel Node.js Serverless — /api/auth
- *
- * GET ?action=config
- *   → returns public { ok: true, googleClientId }
- *
- * GET (Authorization: Bearer <token>)
- *   → verify JWT → return user
- *
- * POST { action: "google", credential }
- *   → verify Google ID token server-side → find-or-create/link user by email → return JWT
- *
- * POST { action: "signup", email, password, name }
- *   → create a new account only; existing accounts must sign in
- *
- * POST { action: "login", email, password }
- *   → verify password → return JWT
- *
- * Required env vars:
- *   MONGODB_URI       — MongoDB Atlas connection string
- *   JWT_SECRET        — any long random string (e.g. openssl rand -hex 32)
- *   GOOGLE_CLIENT_ID  — Google OAuth 2.0 Web Client ID (for Sign in with Google)
- */
-
+const { randomBytes, createHash } = require("crypto");
 const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
 const { OAuth2Client } = require("google-auth-library");
 const { getDb } = require("./_lib/db");
-const { getEntitlements, TRIAL_DAYS } = require("./_lib/plans");
-
-const SALT_ROUNDS = 10;
-const JWT_EXPIRES = "7d";
-
-function cors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+const { cors } = require("./_lib/authMiddleware");
+const { appOrigin } = require("./_lib/origins");
+const { requireAccount, verified, signSession, publicUser } = require("./_lib/accountSecurity");
+const { authLimits, WRITE } = require("./_lib/rateLimits");
+const { requestVerification, completeVerification, versionFilter } = require("./_lib/emailVerification");
+const GENERIC = { ok: true, verificationRequired: true, message: "If this address is eligible, check your email to verify ownership and choose a password. Existing verified users should sign in." };
+function clientId() {
+  const id = (process.env.GOOGLE_CLIENT_ID || "").trim();
+  return id && !id.endsWith(".apps.googleusercontent.com") ? id + ".apps.googleusercontent.com" : id;
 }
-
-function parseBody(req) {
-  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
-  const raw = typeof req.body === "string" ? req.body : "";
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
-}
-
-function signToken(payload, secret) {
-  return jwt.sign({ ...payload, purpose: "session" }, secret, { expiresIn: JWT_EXPIRES });
-}
-
-function verifyToken(token, secret) {
-  const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
-  if (!decoded || typeof decoded.email !== "string" || !decoded.email.trim() ||
-      (decoded.purpose !== undefined && decoded.purpose !== "session") ||
-      decoded.provider !== undefined || decoded.nonce !== undefined || decoded.redirectUri !== undefined) {
-    throw new Error("Invalid session token");
-  }
-  return decoded;
-}
-
-function extractToken(req) {
-  const header = req.headers?.authorization || "";
-  if (header.startsWith("Bearer ")) return header.slice(7).trim();
-  return null;
-}
-
-function normalizeGoogleClientId(raw) {
-  const trimmed = (raw || "").trim();
-  if (!trimmed) return "";
-  return trimmed.endsWith(".apps.googleusercontent.com")
-    ? trimmed
-    : `${trimmed}.apps.googleusercontent.com`;
-}
-
-// Strip sensitive fields before returning user to client, attach entitlements
-function safeUser(user) {
-  if (!user) return user;
-  const { passwordHash, ...rest } = user;
-  const entitlements = getEntitlements(user);
-  return { ...rest, entitlements };
-}
-
-async function handler(req, res) {
-  cors(res);
+module.exports = async function handler(req, res) {
+  if (cors(req, res)) return;
+  res.setHeader("Cache-Control", "no-store");
   if (req.method === "OPTIONS") return res.status(204).end();
-
-  const urlObj = new URL(req.url || "/api/auth", `http://${req.headers?.host || "localhost"}`);
-  const queryAction = req.query?.action || urlObj.searchParams.get("action") || "";
-
-  // ── GET /api/auth?action=config — public Google Client ID & Paddle config ──
-  if (req.method === "GET" && queryAction === "config") {
-    const googleClientId = normalizeGoogleClientId(process.env.GOOGLE_CLIENT_ID) || null;
-    const paddleEnv = (process.env.PADDLE_ENV || "live").trim().toLowerCase();
-    const paddleClientToken = (process.env.PADDLE_CLIENT_TOKEN || "").trim() || null;
-    const paddlePriceId = (process.env.PADDLE_PRICE_ID_PRO || "pri_01m4tf8w6602rpfrhv9mbrcm7b").trim();
-    return res.status(200).json({
-      ok: true,
-      googleClientId,
-      paddle: {
-        env: paddleEnv,
-        clientToken: paddleClientToken,
-        defaultPriceId: paddlePriceId,
-      },
-    });
+  const url = new URL(req.url || "/api/auth", "https://sharflow.online");
+  if (req.method === "GET" && (req.query?.action || url.searchParams.get("action")) === "config") {
+    return res.status(200).json({ ok: true, googleClientId: clientId() || null, appOrigin: appOrigin(),
+      paddle: { env: process.env.PADDLE_ENV || "live", clientToken: process.env.PADDLE_CLIENT_TOKEN || null,
+        defaultPriceId: process.env.PADDLE_PRICE_ID_PRO || "pri_01m4tf8w6602rpfrhv9mbrcm7b" } });
   }
-
-  const jwtSecret = (process.env.JWT_SECRET || "").trim();
-  if (!jwtSecret) {
-    return res.status(500).json({ error: "JWT_SECRET env var not set. Add it in Vercel project settings." });
-  }
-
-  // ── GET /api/auth — verify token + return current user ───────────────────
   if (req.method === "GET") {
-    const token = extractToken(req);
-    if (!token) return res.status(401).json({ error: "No token provided" });
-
-    try {
-      const decoded = verifyToken(token, jwtSecret);
-      const db = await getDb();
-      let user = await db.collection("users").findOne({ email: decoded.email });
-      if (!user) {
-        const now = new Date();
-        const trialStartedAt = now;
-        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-        user = {
-          email: decoded.email,
-          name: decoded.name || decoded.email.split("@")[0] || "User",
-          passwordHash: "",
-          plan: "starter",
-          trialStartedAt,
-          trialEndsAt,
-          active: true,
-          profile: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-        await db.collection("users").insertOne(user);
-      }
-      return res.status(200).json({ ok: true, user: safeUser(user) });
-    } catch (err) {
-      return res.status(401).json({ error: "Invalid or expired token" });
-    }
+    const user = await requireAccount(req, res, { allowReview: true });
+    return user ? res.status(200).json({ ok: true, user: publicUser(user) }) : undefined;
   }
-
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
   try {
-    const body = parseBody(req);
-    const action = (body.action || "").trim();
-
-    const db = await getDb();
-    const users = db.collection("users");
-
-    // ── GOOGLE SIGN-IN (GIS ID TOKEN VERIFICATION) ─────────────────────────
-    if (action === "google") {
-      const credential = (body.credential || "").trim();
-      if (!credential) {
-        return res.status(400).json({ error: "Missing Google credential token." });
-      }
-
-      const rawClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
-      const googleClientId = normalizeGoogleClientId(rawClientId);
-      if (!googleClientId) {
-        return res.status(500).json({ error: "GOOGLE_CLIENT_ID is not configured on the server." });
-      }
-
-      let payload;
-      try {
-        const googleClient = new OAuth2Client(googleClientId);
-        const ticket = await googleClient.verifyIdToken({
-          idToken: credential,
-          audience: [googleClientId, rawClientId],
-        });
-        payload = ticket.getPayload();
-      } catch (verifyErr) {
-        console.error("[Auth] Google ID token verification failed:", verifyErr.message);
-        return res.status(401).json({ error: "Invalid or expired Google sign-in token." });
-      }
-
-      if (!payload || !payload.email || payload.email_verified !== true) {
-        return res.status(401).json({ error: "Google account email is not verified." });
-      }
-
-      const email = payload.email.trim().toLowerCase();
-      const googleName = (payload.name || email.split("@")[0] || "User").trim();
-      const googleSub = payload.sub || "";
-      const now = new Date();
-
-      let user = await users.findOne({ email });
-
-      if (user) {
-        // Link Google sign-in to the existing user document without overwriting profile/passwordHash
-        const updatedFields = {
-          googleSub,
-          authProvider: user.passwordHash ? "both" : "google",
-          lastLoginAt: now,
-          updatedAt: now,
-        };
-        if (!user.name && googleName) {
-          updatedFields.name = googleName;
-        }
-        await users.updateOne({ email }, { $set: updatedFields });
-        user = { ...user, ...updatedFields };
-      } else {
-        // Create new user document
-        const trialStartedAt = now;
-        const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-        user = {
-          email,
-          name: googleName,
-          passwordHash: "",
-          googleSub,
-          authProvider: "google",
-          plan: "starter",
-          trialStartedAt,
-          trialEndsAt,
-          active: true,
-          profile: null,
-          createdAt: now,
-          updatedAt: now,
-          lastLoginAt: now,
-        };
-        await users.insertOne(user);
-      }
-
-      const token = signToken({ email, name: user.name }, jwtSecret);
-      return res.status(200).json({
-        ok: true,
-        token,
-        user: safeUser(user),
-      });
+    let body = req.body;
+    if (typeof body === "string") { try { body = JSON.parse(body); } catch { body = null; } }
+    if (!body || typeof body !== "object" || Array.isArray(body)) return res.status(400).json({ error: "Invalid request" });
+    const action = body.action;
+    if (!["signup", "request_verification", "complete_verification", "google", "login"].includes(action)) return res.status(400).json({ error: "Unknown action" });
+    const db = await getDb(), users = db.collection("users");
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (["signup", "request_verification", "login"].includes(action) && (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254)) return res.status(400).json({ error: "A valid email is required" });
+    await authLimits(db, req, action, email);
+    if (action === "signup" || action === "request_verification") {
+      if (process.env.EMAIL_DELIVERY_MODE !== "resend" || !process.env.RESEND_API_KEY) return res.status(503).json({ error: "Verification delivery is not enabled." });
+      await requestVerification(db, email);
+      return res.status(202).json(GENERIC);
     }
-
-    // ── EMAIL / PASSWORD VALIDATION (for signup & login) ────────────────────
-    const email = (body.email || "").trim().toLowerCase();
-    const password = (body.password || "").trim();
-
-    if (!email) return res.status(400).json({ error: "email is required" });
-    if (!password) return res.status(400).json({ error: "password is required" });
-    if (password.length < 6) return res.status(400).json({ error: "password must be at least 6 characters" });
-
-    // ── SIGNUP ──────────────────────────────────────────────────────────────
-    if (action === "signup") {
-      const name = (body.name || "").trim();
-
-      // Check if email already exists
-      const existing = await users.findOne({ email });
-      if (existing) {
-        return res.status(409).json({ error: "An account with this email already exists. Please sign in." });
-      }
-
-      const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-      const now = new Date();
-
-      const trialStartedAt = now;
-      const trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-
-      const newUser = {
-        email,
-        name,
-        passwordHash,
-        plan: "starter",
-        trialStartedAt,
-        trialEndsAt,
-        active: true,         // default active status for 14-day trial
-        profile: null,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await users.insertOne(newUser);
-
-      const token = signToken({ email, name }, jwtSecret);
-
-      return res.status(201).json({
-        ok: true,
-        token,
-        user: safeUser(newUser),
-      });
+    if (action === "complete_verification") {
+      const user = await completeVerification(db, body.token, body.password);
+      if (!user) return res.status(400).json({ error: "Invalid/expired link, or password must be 12+ characters and at most 72 UTF-8 bytes." });
+      return res.status(200).json({ ok: true, token: signSession(user), user: publicUser(user) });
     }
-
-    // ── LOGIN ────────────────────────────────────────────────────────────────
     if (action === "login") {
+      if (typeof body.password !== "string" || Buffer.byteLength(body.password) > 72) return res.status(401).json({ error: "Invalid email or password" });
       const user = await users.findOne({ email });
-
-      if (!user) {
-        return res.status(401).json({ error: "Invalid email or password" });
-      }
-
-      // Google-only or legacy passwordless users
-      if (!user.passwordHash) {
-        return res.status(401).json({
-          error: user.googleSub
-            ? "This account uses Google Sign-In. Please sign in with Google."
-            : "No password is set for this account. Contact hello@sharflow.online for account recovery assistance.",
-        });
-      }
-
-      const match = await bcrypt.compare(password, user.passwordHash);
-      if (!match) {
-        return res.status(401).json({ error: "Invalid email or password" });
-      }
-
-      // Update last login
-      await users.updateOne({ email }, { $set: { lastLoginAt: new Date() } });
-
-      const token = signToken({ email, name: user.name }, jwtSecret);
-
-      return res.status(200).json({
-        ok: true,
-        token,
-        user: safeUser(user),
-      });
+      // Unknown/unverified accounts still execute a password comparison; no auto-send on login.
+      const match = await bcrypt.compare(body.password, user?.passwordHash || "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy");
+      if (!match) return res.status(401).json({ error: "Invalid email or password" });
+      if (!verified(user)) return res.status(401).json({ error: "verification_required", message: "Sign in with Google or request an ownership verification link." });
+      return res.status(200).json({ ok: true, token: signSession(user), user: publicUser(user) });
     }
-
-    return res.status(400).json({ error: "Unknown action. Use 'signup', 'login', or 'google'." });
-
+    if (typeof body.credential !== "string" || body.credential.length > 16384 || !clientId()) return res.status(401).json({ error: "Invalid Google credential" });
+    let identity;
+    try {
+      const ticket = await new OAuth2Client(clientId()).verifyIdToken({ idToken: body.credential, audience: clientId() });
+      identity = ticket.getPayload();
+    } catch { return res.status(401).json({ error: "Invalid Google credential" }); }
+    if (!identity?.email_verified || identity.email_verified !== true || typeof identity.email !== "string" || !identity.sub) return res.status(401).json({ error: "Google email must be verified" });
+    const googleEmail = identity.email.trim().toLowerCase();
+    let user = await users.findOne({ email: googleEmail });
+    if (!user) {
+      const _id = "enrollment:" + createHash("sha256").update(googleEmail).digest("hex");
+      try { await users.updateOne({ _id }, { $setOnInsert: { email: googleEmail, active: true, plan: "starter", createdAt: new Date(), profile: null } }, { upsert: true, writeConcern: WRITE }); }
+      catch (err) { if (err.code !== 11000 || !err.keyPattern?._id) throw err; }
+      user = await users.findOne({ _id });
+    }
+    if (!user || user.active === false || (verified(user) && user.googleSub && user.googleSub !== identity.sub)) return res.status(403).json({ error: "Account requires support review" });
+    const claiming = !verified(user), now = new Date();
+    const fields = { googleSub: identity.sub, name: identity.name || user.name || "", lastLoginAt: now, updatedAt: now };
+    if (claiming) Object.assign(fields, { passwordHash: "", authProvider: "google", emailVerifiedAt: now,
+      authVersion: randomBytes(24).toString("hex"), configurationReviewRequired: Boolean(user.profile), integrationResetAt: now,
+      trialStartedAt: user.trialStartedAt || now, trialEndsAt: user.trialEndsAt || new Date(now.getTime() + 14 * 86400000) });
+    else fields.authProvider = user.passwordHash ? "both" : "google";
+    const updated = await users.findOneAndUpdate({ _id: user._id, authVersion: versionFilter(user) }, {
+      $set: fields, ...(claiming ? { $unset: { verification: "", pendingPaddleCheckoutToken: "" } } : {}),
+    }, { returnDocument: "after", includeResultMetadata: false, writeConcern: WRITE });
+    if (!updated) return res.status(409).json({ error: "Account changed. Please sign in again." });
+    return res.status(200).json({ ok: true, token: signSession(updated), user: publicUser(updated) });
   } catch (err) {
-    console.error("auth route error:", err);
-    return res.status(500).json({ error: err.message || "Server error" });
+    if (err.status === 429) { res.setHeader("Retry-After", String(err.retryAfter)); return res.status(429).json({ error: err.message }); }
+    return res.status(503).json({ error: "Authentication temporarily unavailable. Please try again." });
   }
-}
-
-module.exports = handler;
+};

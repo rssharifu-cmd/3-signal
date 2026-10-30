@@ -10,13 +10,13 @@ async function claimEmailSend(db, userId, now = new Date()) {
     const result = await db.collection("email_send_guards").updateOne(
       { _id: String(userId), nextAllowedAt: { $lte: now } },
       { $set: { nextAllowedAt: new Date(now.getTime() + COOLDOWN_MS), attemptId } },
-      { upsert: true }
+      { upsert: true, writeConcern: { w: "majority", wtimeoutMS: 5000 } }
     );
     if (result.matchedCount === 1 || result.upsertedCount === 1) {
       return { allowed: true, idempotencyKey: `browser-email-${attemptId}` };
     }
   } catch (err) {
-    if (err.code !== 11000) throw err;
+    if (err.code !== 11000 || !err.keyPattern?._id) throw err;
   }
   return { allowed: false, retryAfter: COOLDOWN_MS / 1000 };
 }

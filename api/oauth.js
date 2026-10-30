@@ -1,3 +1,5 @@
+const { appOrigin } = require("./_lib/origins");
+const { requireAccount } = require("./_lib/accountSecurity");
 /**
  * Sharflow — OAuth Authorization & Callback Endpoint
  *
@@ -61,28 +63,10 @@ function parseCookies(req) {
 
 // Cookie creation and clearing must use the same scope.
 function stateCookie(req, token, maxAge) {
-  const host = String(req.headers?.host || "").split(":")[0].toLowerCase();
-  // New name avoids ambiguity with legacy host-only cookies during rollout.
-  const flags = ["sharflow_oauth_attempt=" + encodeURIComponent(token), "Path=/", "Max-Age=" + maxAge, "SameSite=Lax", "HttpOnly"];
-  // The production callback uses apex even when authorization starts on www.
-  if (host === "sharflow.online" || host === "www.sharflow.online") flags.push("Domain=sharflow.online");
-  if (req.headers?.["x-forwarded-proto"] === "https" || process.env.NODE_ENV === "production" || host === "sharflow.online" || host === "www.sharflow.online") flags.push("Secure");
-  return flags.join("; ");
+  return ["sharflow_oauth_attempt=" + encodeURIComponent(token), "Path=/", "Max-Age=" + maxAge,
+    "SameSite=Lax", "HttpOnly", ...(appOrigin().startsWith("https:") ? ["Secure"] : [])].join("; ");
 }
-
-// Production callbacks use apex; non-production callbacks retain the trusted origin.
-function resolveRedirectUri(req, clientOrigin) {
-  const isProd = process.env.NODE_ENV === "production";
-  const validatedOrigin = getValidatedOrigin(clientOrigin, req);
-
-  // In non-production, allow validated local dev or preview container callback
-  if (!isProd && (validatedOrigin.includes("localhost") || validatedOrigin.includes("127.0.0.1") || validatedOrigin.includes("run.app") || validatedOrigin.includes("vercel.app"))) {
-    return `${validatedOrigin}/api/oauth-callback`;
-  }
-
-  const prodBase = PRODUCTION_ORIGIN || "https://sharflow.online";
-  return `${prodBase}/api/oauth-callback`;
-}
+function resolveRedirectUri() { return appOrigin() + "/api/oauth-callback"; }
 
 /**
  * Returns HTML to inform user and postMessage to opener window.
@@ -197,7 +181,7 @@ function renderCallbackHtml(options) {
 }
 
 module.exports = async function handler(req, res) {
-  cors(req, res);
+  if (cors(req, res)) return;
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed." });
 
@@ -207,10 +191,9 @@ module.exports = async function handler(req, res) {
 
   // ── 1. GENERATE OAUTH AUTHORIZATION URL ──────────────────────────────────
   if (!isCallback && (action === "url" || req.method === "GET")) {
-    const userEmail = extractEmail(req);
-    if (!userEmail) {
-      return res.status(401).json({ ok: false, error: "Unauthorized. Please sign in to connect data sources." });
-    }
+    const authenticatedUser = await requireAccount(req, res);
+    if (!authenticatedUser) return;
+    const userEmail = authenticatedUser.email;
 
     const rawProvider = req.query?.provider || urlObj.searchParams.get("provider") || "google_search_console";
     let targetProvider = rawProvider;
@@ -223,7 +206,8 @@ module.exports = async function handler(req, res) {
 
     const clientOrigin = req.query?.origin || urlObj.searchParams.get("origin") || "";
     const clientReturnUrl = req.query?.returnUrl || urlObj.searchParams.get("returnUrl") || "";
-    const validatedOrigin = getValidatedOrigin(clientOrigin, req);
+    if (clientOrigin && !isTrustedOrigin(clientOrigin)) return res.status(400).json({ error: "Untrusted origin" });
+    const validatedOrigin = getValidatedOrigin(clientOrigin);
     const redirectUri = resolveRedirectUri(req, clientOrigin);
     const safeReturnUrl = getSafeReturnUrl(clientReturnUrl || `${validatedOrigin}/#sources`, validatedOrigin);
 
@@ -245,7 +229,7 @@ module.exports = async function handler(req, res) {
           encryptedRefreshToken: { $exists: true, $ne: "" },
         });
 
-        if (existingGoogle && existingGoogle.encryptedRefreshToken) {
+        if (existingGoogle && existingGoogle.encryptedRefreshToken && (!authenticatedUser.integrationResetAt || (existingGoogle.ownershipVerifiedAt >= authenticatedUser.integrationResetAt && existingGoogle.provider === targetProvider))) {
           const existingScopes = Array.isArray(existingGoogle.scopes) ? existingGoogle.scopes : [];
           const hasRequiredScope = existingScopes.some((s) => s.toLowerCase().includes(requiredScopeKeyword));
 
@@ -262,6 +246,7 @@ module.exports = async function handler(req, res) {
                   providerAccountId: existingGoogle.providerAccountId || "",
                   scopes: existingScopes,
                   status: "connected",
+                  ownershipVerifiedAt: new Date(),
                   encryptedRefreshToken: existingGoogle.encryptedRefreshToken,
                   updatedAt: now,
                 },
@@ -296,6 +281,7 @@ module.exports = async function handler(req, res) {
         clientOrigin: validatedOrigin,
         returnUrl: safeReturnUrl,
         purpose: "oauth_state",
+        authVersion: authenticatedUser.authVersion,
         nonce: randomBytes(32).toString("hex"),
       },
       jwtSecret,
@@ -306,10 +292,10 @@ module.exports = async function handler(req, res) {
     const statePayload = jwt.verify(stateToken, jwtSecret, { algorithms: ["HS256"] });
     try {
       const db = await getDb();
-      await db.collection("oauth_pending").insertOne({
+      await db.collection("oauth_attempts").insertOne({
         _id: statePayload.nonce, email: userEmail, provider: targetProvider,
         stateToken, expiresAt: new Date(statePayload.exp * 1000), createdAt: new Date(),
-      });
+      }, { writeConcern: { w: "majority", wtimeoutMS: 5000 } });
     } catch (_) {
       return res.status(503).json({ error: "Could not start authorization. Please try again." });
     }
@@ -404,7 +390,7 @@ module.exports = async function handler(req, res) {
     }
     try {
       const decoded = jwt.verify(cookieState, jwtSecret, { algorithms: ["HS256"] });
-      if (decoded.purpose !== "oauth_state" ||
+      if (decoded.purpose !== "oauth_state" || typeof decoded.authVersion !== "string" ||
           !["google_search_console", "google_analytics", "bing_webmaster"].includes(decoded.provider) ||
           typeof decoded.email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(decoded.email) ||
           typeof decoded.nonce !== "string" || !/^[a-f0-9]{64}$/.test(decoded.nonce) ||
@@ -424,11 +410,11 @@ module.exports = async function handler(req, res) {
     try {
       callbackDb = await getDb();
       // Atomic deletion is the one-use claim; never select a user by pending count.
-      const claimed = await callbackDb.collection("oauth_pending").findOneAndDelete({
+      const claimed = await callbackDb.collection("oauth_attempts").findOneAndDelete({
         _id: statePayload.nonce, stateToken: cookieState,
         email: statePayload.email, provider: statePayload.provider,
         expiresAt: { $gt: new Date() },
-      });
+      }, { includeResultMetadata: false, writeConcern: { w: "majority", wtimeoutMS: 5000 } });
       if (!claimed) return fail(400, "Authorization was already used or replaced. Please start connection again.");
     } catch (_) {
       return fail(503, "Could not verify authorization. Please start connection again.");
@@ -458,7 +444,7 @@ module.exports = async function handler(req, res) {
       const datasourcesCol = db.collection("datasources");
 
       const user = await usersCol.findOne({ email: userEmail });
-      if (!user || user.active === false) return fail(403, "Account unavailable. Please sign in again.");
+      if (!user || !user.emailVerifiedAt || user.authVersion !== statePayload.authVersion || user.active === false || user.configurationReviewRequired) return fail(403, "Account unavailable. Please sign in again.");
       const userId = user._id;
 
       // ── Handle Google Token Exchange ──────────────────────────────────
@@ -516,11 +502,12 @@ module.exports = async function handler(req, res) {
             provider: { $in: ["google_search_console", "google_analytics", "google"] },
             encryptedRefreshToken: { $exists: true, $ne: "" },
           });
-          if (existing && existing.encryptedRefreshToken) {
+          if (existing && existing.encryptedRefreshToken && (!user.integrationResetAt || existing.ownershipVerifiedAt >= user.integrationResetAt)) {
             encryptedRefreshToken = existing.encryptedRefreshToken;
           }
         }
 
+        if (!encryptedRefreshToken) return fail(400, "A fresh offline authorization is required. Please reconnect and grant consent.");
         const grantedScopes = tokenData.scope ? tokenData.scope.split(" ") : [];
         const now = new Date();
 
@@ -538,12 +525,14 @@ module.exports = async function handler(req, res) {
               providerAccountId: googleAccountEmail,
               scopes: grantedScopes,
               status: "connected",
+              ownershipVerifiedAt: new Date(),
+              ...(user.integrationResetAt ? { selectedProperty: null } : {}),
               updatedAt: now,
               ...(encryptedRefreshToken ? { encryptedRefreshToken } : {}),
             },
             $setOnInsert: {
               createdAt: now,
-              selectedProperty: null,
+              ...(!user.integrationResetAt ? { selectedProperty: null } : {}),
               lastSuccessfulSync: null,
             },
           },
@@ -583,7 +572,7 @@ module.exports = async function handler(req, res) {
               },
               $setOnInsert: {
                 createdAt: now,
-                selectedProperty: null,
+                ...(!user.integrationResetAt ? { selectedProperty: null } : {}),
                 lastSuccessfulSync: null,
               },
             },
@@ -634,6 +623,7 @@ module.exports = async function handler(req, res) {
           ? encryptToken(tokenData.refresh_token)
           : "";
 
+        if (!encryptedRefreshToken) return fail(400, "A fresh Bing authorization is required. Please reconnect.");
         const now = new Date();
         await datasourcesCol.updateOne(
           { userEmail, provider: "bing_webmaster" },
@@ -644,12 +634,14 @@ module.exports = async function handler(req, res) {
               provider: "bing_webmaster",
               scopes: [BING_SCOPE],
               status: "connected",
+              ownershipVerifiedAt: new Date(),
+              ...(user.integrationResetAt ? { selectedProperty: null } : {}),
               updatedAt: now,
               ...(encryptedRefreshToken ? { encryptedRefreshToken } : {}),
             },
             $setOnInsert: {
               createdAt: now,
-              selectedProperty: null,
+              ...(!user.integrationResetAt ? { selectedProperty: null } : {}),
               lastSuccessfulSync: null,
             },
           },

@@ -60,7 +60,7 @@ test("S3 administrator cannot bypass target plan restrictions", async () => {
   process.env.ADMIN_EMAILS = "";
 });
 test("S3 missing account denied, preflight and unsupported methods do not execute", async () => {
-  const x = setup(); assert.equal((await call(x.handler, { email: "missing@example.com" })).statusCode, 403);
+  const x = setup(); assert.equal((await call(x.handler, { email: "missing@example.com" })).statusCode, 401);
   assert.equal((await call(x.handler, { method: "OPTIONS", email: null })).statusCode, 204);
   assert.equal((await call(x.handler, { method: "DELETE" })).statusCode, 405); assert.equal(x.runs.length, 0);
 });
