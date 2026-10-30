@@ -11,7 +11,7 @@
  *   → verify Google ID token server-side → find-or-create/link user by email → return JWT
  *
  * POST { action: "signup", email, password, name }
- *   → hash password → save user (or set password on passwordless Google account) → return JWT
+ *   → create a new account only; existing accounts must sign in
  *
  * POST { action: "login", email, password }
  *   → verify password → return JWT
@@ -44,11 +44,17 @@ function parseBody(req) {
 }
 
 function signToken(payload, secret) {
-  return jwt.sign(payload, secret, { expiresIn: JWT_EXPIRES });
+  return jwt.sign({ ...payload, purpose: "session" }, secret, { expiresIn: JWT_EXPIRES });
 }
 
 function verifyToken(token, secret) {
-  return jwt.verify(token, secret);
+  const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
+  if (!decoded || typeof decoded.email !== "string" || !decoded.email.trim() ||
+      (decoded.purpose !== undefined && decoded.purpose !== "session") ||
+      decoded.provider !== undefined || decoded.nonce !== undefined || decoded.redirectUri !== undefined) {
+    throw new Error("Invalid session token");
+  }
+  return decoded;
 }
 
 function extractToken(req) {
@@ -239,27 +245,6 @@ async function handler(req, res) {
       // Check if email already exists
       const existing = await users.findOne({ email });
       if (existing) {
-        // If this is a Google-created or legacy passwordless account, allow setting a password on the same document
-        if (!existing.passwordHash) {
-          const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-          const now = new Date();
-          const updatedName = existing.name || name || email.split("@")[0] || "User";
-          const updatedFields = {
-            passwordHash,
-            name: updatedName,
-            authProvider: existing.googleSub ? "both" : "password",
-            lastLoginAt: now,
-            updatedAt: now,
-          };
-          await users.updateOne({ email }, { $set: updatedFields });
-          const updatedUser = { ...existing, ...updatedFields };
-          const token = signToken({ email, name: updatedName }, jwtSecret);
-          return res.status(200).json({
-            ok: true,
-            token,
-            user: safeUser(updatedUser),
-          });
-        }
         return res.status(409).json({ error: "An account with this email already exists. Please sign in." });
       }
 
@@ -305,8 +290,8 @@ async function handler(req, res) {
       if (!user.passwordHash) {
         return res.status(401).json({
           error: user.googleSub
-            ? "This account uses Google Sign-In. Please click 'Sign in with Google' above, or use the 'Create account' tab to set a password."
-            : "No password is set for this account yet. Please click 'Sign in with Google' above, or use the 'Create account' tab to set a password.",
+            ? "This account uses Google Sign-In. Please sign in with Google."
+            : "No password is set for this account. Contact hello@sharflow.online for account recovery assistance.",
         });
       }
 

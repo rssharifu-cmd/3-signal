@@ -104,6 +104,7 @@ async function processUser(user, db, targetDate) {
           toEmail: email,
           userName: user.name || email.split("@")[0],
           report,
+          entitlements,
         });
         emailSent = true;
         console.log(`[Watchdog Scheduler] Email sent successfully to ${email}`);

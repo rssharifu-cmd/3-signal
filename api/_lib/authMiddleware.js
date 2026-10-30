@@ -147,11 +147,16 @@ function extractEmail(req) {
   const secret = (process.env.JWT_SECRET || "").trim();
   if (!secret) return null;
   const header = req.headers?.authorization || "";
+  if (typeof header !== "string") return null;
   if (!header.startsWith("Bearer ")) return null;
   const token = header.slice(7).trim();
   try {
-    const decoded = jwt.verify(token, secret);
-    return decoded.email || null;
+    const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
+    // Legacy login sessions have no purpose. OAuth/checkout tokens are not sessions.
+    if (!decoded || typeof decoded.email !== "string" || !decoded.email.trim() ||
+        (decoded.purpose !== undefined && decoded.purpose !== "session") ||
+        decoded.provider !== undefined || decoded.nonce !== undefined || decoded.redirectUri !== undefined) return null;
+    return decoded.email.trim().toLowerCase();
   } catch {
     return null;
   }

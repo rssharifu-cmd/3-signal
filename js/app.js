@@ -1387,7 +1387,7 @@ async function submitWebsiteOnboarding() {
 
   if (savedEmail) {
     try {
-      await fetch("/api/user", {
+      const profileResponse = await fetch("/api/user", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -1418,16 +1418,13 @@ async function submitWebsiteOnboarding() {
         }),
       });
 
-      // Send welcome email if enabled (without unlock date or trial scheduling)
+      if (!profileResponse.ok) throw new Error("Website profile could not be saved.");
+
+      // The server loads the welcome recipient and profile from this session.
       fetch("/api/send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "welcome",
-          email: savedEmail,
-          name: form.name,
-          profileSummary: summaryText,
-        }),
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ action: "welcome" }),
       }).catch((e) => console.warn("Welcome email send error:", e));
     } catch (err) {
       console.warn("Saving profile to DB failed:", err);
@@ -2404,7 +2401,6 @@ async function generateDashboardDigest(auto = false) {
 
 async function sendDigestEmail() {
   const savedEmail = localStorage.getItem(STORAGE.email) || "";
-  const form = getSavedForm();
   const rawSavedReport = localStorage.getItem(STORAGE.lastWatchdogReport);
   let report = window._lastWatchdogReport || null;
   if (!report && rawSavedReport) {
@@ -2415,7 +2411,7 @@ async function sendDigestEmail() {
     toast("Sign in with email first.");
     return;
   }
-  if (!report) {
+  if (!report || !report.reportId) {
     toast("Run a Watchdog website check first.");
     return;
   }
@@ -2423,13 +2419,8 @@ async function sendDigestEmail() {
   try {
     const res = await fetch("/api/send", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "watchdog_report",
-        email: savedEmail,
-        name: form.name || "",
-        report,
-      }),
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ action: "watchdog_report", reportId: report.reportId }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.status === 403 && data.error === "plan_required") {

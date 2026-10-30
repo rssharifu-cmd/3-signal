@@ -10,6 +10,7 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
 const { getDb } = require("./_lib/db");
+const { extractEmail } = require("./_lib/authMiddleware");
 const { getEntitlements, ensureTrial, TRIAL_DAYS } = require("./_lib/plans");
 
 function cors(res) {
@@ -22,20 +23,6 @@ function parseBody(req) {
   if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
   const raw = typeof req.body === "string" ? req.body : "";
   try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
-}
-
-function extractEmail(req) {
-  const secret = (process.env.JWT_SECRET || "").trim();
-  if (!secret) return null;
-  const header = req.headers?.authorization || "";
-  if (!header.startsWith("Bearer ")) return null;
-  const token = header.slice(7).trim();
-  try {
-    const decoded = jwt.verify(token, secret);
-    return decoded.email || null;
-  } catch {
-    return null;
-  }
 }
 
 function safeUser(user) {
