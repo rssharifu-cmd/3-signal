@@ -43,7 +43,7 @@ async function completeVerification(db, raw, password) {
   if (!pending) return null;
   const passwordHash = await bcrypt.hash(password, 10);
   return users.findOneAndUpdate({ ...query, _id: pending._id, authVersion: versionFilter(pending) }, {
-    $set: { passwordHash, emailVerifiedAt: now, authVersion: randomBytes(24).toString("hex"), authProvider: "password",
+    $set: { passwordHash, emailVerifiedAt: now, inboxVerifiedAt: now, authVersion: randomBytes(24).toString("hex"), authProvider: "password",
       configurationReviewRequired: Boolean(pending.profile), integrationResetAt: now,
       trialStartedAt: pending.trialStartedAt || now, trialEndsAt: pending.trialEndsAt || new Date(now.getTime() + 14 * 86400000), updatedAt: now },
     $unset: { verification: "", pendingPaddleCheckoutToken: "" },

@@ -11,7 +11,8 @@ Branch: security/phase1-s1-s4-20261030. Date: 30 October 2026.
 - [x] Environment-specific exact origins, configured callbacks, host-only cookies, www-to-apex redirect configuration.
 - [x] Prevent old integration token/property reuse following account claiming.
 - [x] Read-only index checker; no automatic index or customer changes.
-- [x] 61 security tests; GA4 10, Paddle 47, plans 14, research 45 passed; 51 JS syntax checks passed.
+- [x] P1 blockers corrected: immutable Google subjects, authoritative-email proof, inbox/session-gated unsafe linking, production scheduler delivery configuration.
+- [x] 79 security tests; GA4 10, Paddle 47, plans 14, research 45 passed; 51 JS syntax checks passed.
 - [ ] Compliance suite fully green: 10 passed, 1 existing Merchant of Record wording failure.
 - [ ] Approve documented legacy session/ownership/review/reconnection migration and customer communication.
 - [ ] Verify isolated staging topology, indexes, concurrent majority writes, trusted proxy IP configuration.

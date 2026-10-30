@@ -62,23 +62,42 @@ module.exports = async function handler(req, res) {
       const ticket = await new OAuth2Client(clientId()).verifyIdToken({ idToken: body.credential, audience: clientId() });
       identity = ticket.getPayload();
     } catch { return res.status(401).json({ error: "Invalid Google credential" }); }
-    if (!identity?.email_verified || identity.email_verified !== true || typeof identity.email !== "string" || !identity.sub) return res.status(401).json({ error: "Google email must be verified" });
+    if (!identity?.email_verified || identity.email_verified !== true || typeof identity.email !== "string" || typeof identity.sub !== "string" || !identity.sub) return res.status(401).json({ error: "Google email must be verified" });
     const googleEmail = identity.email.trim().toLowerCase();
     let user = await users.findOne({ email: googleEmail });
+    // An established provider identity must never be replaced by an email match, even during migration.
+    if (user?.googleSub && user.googleSub !== identity.sub) return res.status(403).json({ error: "Account requires support review" });
+    if (user?.active === false) return res.status(403).json({ error: "Account requires support review" });
+    // Google is authoritative for Gmail and verified Workspace addresses, not unmanaged third-party mail.
+    const authoritativeEmail = googleEmail.endsWith("@gmail.com") ||
+      (typeof identity.hd === "string" && Boolean(identity.hd.trim()));
+    const establishedLogin = verified(user) && user.googleSub === identity.sub;
+    if (!authoritativeEmail && !establishedLogin) {
+      const inboxAge = Date.now() - new Date(user?.inboxVerifiedAt || 0).getTime();
+      if (!verified(user) || !Number.isFinite(inboxAge) || inboxAge < 0 || inboxAge > 30 * 60000 || !req.headers?.authorization) {
+        return res.status(401).json({ error: "verification_required", message: "Verify your inbox using the email signup flow, then retry Google while signed in. Existing users can sign in with their password." });
+      }
+      const account = await requireAccount(req, res, { allowReview: true });
+      if (!account) return;
+      if (String(account._id) !== String(user._id)) return res.status(403).json({ error: "Account ownership mismatch" });
+    }
     if (!user) {
       const _id = "enrollment:" + createHash("sha256").update(googleEmail).digest("hex");
       try { await users.updateOne({ _id }, { $setOnInsert: { email: googleEmail, active: true, plan: "starter", createdAt: new Date(), profile: null } }, { upsert: true, writeConcern: WRITE }); }
       catch (err) { if (err.code !== 11000 || !err.keyPattern?._id) throw err; }
       user = await users.findOne({ _id });
     }
-    if (!user || user.active === false || (verified(user) && user.googleSub && user.googleSub !== identity.sub)) return res.status(403).json({ error: "Account requires support review" });
+    if (!user || user.active === false || (user.googleSub && user.googleSub !== identity.sub)) return res.status(403).json({ error: "Account requires support review" });
     const claiming = !verified(user), now = new Date();
     const fields = { googleSub: identity.sub, name: identity.name || user.name || "", lastLoginAt: now, updatedAt: now };
     if (claiming) Object.assign(fields, { passwordHash: "", authProvider: "google", emailVerifiedAt: now,
       authVersion: randomBytes(24).toString("hex"), configurationReviewRequired: Boolean(user.profile), integrationResetAt: now,
       trialStartedAt: user.trialStartedAt || now, trialEndsAt: user.trialEndsAt || new Date(now.getTime() + 14 * 86400000) });
     else fields.authProvider = user.passwordHash ? "both" : "google";
-    const updated = await users.findOneAndUpdate({ _id: user._id, authVersion: versionFilter(user) }, {
+    const updated = await users.findOneAndUpdate({ _id: user._id, authVersion: versionFilter(user),
+      // Two concurrent first links must not both replace an absent binding.
+      googleSub: user.googleSub === undefined ? { $exists: false } : user.googleSub,
+    }, {
       $set: fields, ...(claiming ? { $unset: { verification: "", pendingPaddleCheckoutToken: "" } } : {}),
     }, { returnDocument: "after", includeResultMetadata: false, writeConcern: WRITE });
     if (!updated) return res.status(409).json({ error: "Account changed. Please sign in again." });

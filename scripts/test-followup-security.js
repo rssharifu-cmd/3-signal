@@ -78,3 +78,28 @@ test('direct monitoring pipeline refuses unverified or review-required accounts 
   assert.ok(db.calls.every(c=>c.name==='users'&&c.op==='findOne'));
  }
 });
+
+test('P1 scheduler workflow explicitly enables resend only on the production branch',()=>{
+ const fs=require('fs'),path=require('path');const source=fs.readFileSync(path.join(__dirname,'../.github/workflows/daily-digest.yml'),'utf8');
+ const job=source.split('  run-watchdog:')[1];assert.ok(job,'production scheduler job exists');
+ assert.match(job,/^    if: github\.ref == 'refs\/heads\/main'\s*$/m,'manual staging/test branch dispatch must not use production secrets');
+ const step=job.split('      - name: Execute Watchdog Scheduler')[1];assert.ok(step,'scheduler execution step exists');
+ assert.match(step,/^          APP_ENV: production\s*$/m);assert.match(step,/^          EMAIL_DELIVERY_MODE: resend\s*$/m,'production delivery must be explicitly enabled');
+ assert.match(step,/run: node scripts\/run-watchdog-scheduler\.js/);
+});
+test('P1 disabled staging/test delivery cannot send even with an API key',async()=>{
+ const previousMode=process.env.EMAIL_DELIVERY_MODE,previousEnv=process.env.APP_ENV;
+ try {for(const env of ['staging','test']){
+  process.env.APP_ENV=env;delete process.env.EMAIL_DELIVERY_MODE;let sends=0;
+  const db=mockDb({users:[user()]});const helper=loader({db,fetchFn:async()=>{sends++;return response({});}})('api/send.js').sendWatchdogEmail;
+  await assert.rejects(helper({toEmail:'owner@example.com',report:{userEmail:'owner@example.com'}}),/delivery is disabled/);assert.equal(sends,0);
+ }}finally{process.env.EMAIL_DELIVERY_MODE=previousMode;process.env.APP_ENV=previousEnv;}
+});
+
+test('P1 Google frontend submits JSON with owner session for safe first linking',async()=>{
+ const fs=require('fs'),path=require('path'),vm=require('vm');const source=fs.readFileSync(path.join(__dirname,'../js/app.js'),'utf8');
+ const start=source.indexOf('async function handleGoogleCredentialResponse'),end=source.indexOf('let verificationSignupMarkup',start);let sent;
+ const context=vm.createContext({toast(){},authHeaders:()=>({Authorization:'Bearer owner-session'}),fetch:async(_url,options)=>{sent=options;return response({token:'new-session',user:{email:'owner@example.com'}});},localStorage:{setItem(){}},STORAGE:{token:'token',email:'email'},applyUserToLocalState(){},closeAuthModal(){},routeAfterAuth(){}});
+ vm.runInContext(source.slice(start,end),context);await context.handleGoogleCredentialResponse({credential:'google-credential'});
+ assert.equal(sent.headers['Content-Type'],'application/json');assert.equal(sent.headers.Authorization,'Bearer owner-session');assert.deepEqual(JSON.parse(sent.body),{action:'google',credential:'google-credential'});
+});

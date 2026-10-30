@@ -5,6 +5,33 @@ Follow-up base: 6b3cd13dd189913e27502e0ed343ce63f5beca65 (original S1–S4).
 Local implementation only. No push, merge, deployment, production connection, real email,
 credential change, customer migration, or index mutation performed.
 
+## P1 follow-up to d78ec5ff — local only
+
+Established Google subject bindings are immutable, including legacy records without authVersion.
+The conditional write also compares the old subject, preventing concurrent first links from
+replacing one another. Google's authoritative-email rules apply: verified Gmail or Workspace
+(with hd) can claim by email. Unmanaged third-party email_verified alone cannot prove current
+mailbox ownership. Existing verified accounts with a matching bound subject retain normal login.
+
+Legacy unmanaged accounts first complete the existing email/password verification flow; their
+Google subject stays intact. New unmanaged first links additionally require a current same-account
+session and inboxVerifiedAt within 30 minutes, recorded only by successful email verification.
+The frontend forwards the current session with Google requests and explains the inbox-first flow.
+If the fresh linking window expires, use password sign-in; broader re-verification/recovery for
+already verified accounts remains outside this fix. There is no automatic challenge email on a
+Google attempt. This avoids attacker-triggered email and silent attachment of a submitted subject.
+Authoritative Google migration retains profile review, credential clearing and session invalidation.
+
+The daily GitHub Actions job runs only for refs/heads/main and explicitly sets APP_ENV=production
+and EMAIL_DELIVERY_MODE=resend. Manual dispatch on security/staging/test branches skips the entire
+job, including production secrets. No workflow was dispatched or production configuration changed.
+Tests use disabled delivery or mocked capture; no staging delivery infrastructure was added.
+
+Validation for this P1 correction: 79 isolated security tests pass; all 51 JavaScript files pass
+syntax checking. Provider identity payloads, DB and email responses are mocked. Live Google,
+MongoDB and the production scheduled job remain untested. The results below record the original
+Phase 1 follow-up run; the latest security count supersedes its 61-test count.
+
 ## Ownership and authentication
 
 Signup/request_verification returns a generic 202, never a session or password installation.

@@ -601,12 +601,13 @@ async function handleGoogleCredentialResponse(response) {
   try {
     const res = await fetch("/api/auth", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ action: "google", credential: response.credential }),
     });
     const data = await res.json();
     if (!res.ok) {
-      toast(data.error || "Google sign-in failed.");
+      toast(data.message || data.error || "Google sign-in failed.");
+      if (data.error === "verification_required") openAuthModal("signup");
       return;
     }
 
