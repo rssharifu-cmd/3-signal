@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      case "$BACKUP_TEMP_ROOT" in /tmp/sharflow-backup-*) rm -rf -- "$BACKUP_TEMP_ROOT" ;; *) exit 1 ;; esac
+      BACKUP_TEMP_ROOT: /tmp/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
       BACKUP_RAM_ROOT: /dev/shm/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
@@ -63,5 +63,5 @@ jobs:
         run: |
           set -euo pipefail
           # Only these per-run paths may be removed; never workspace, DB, or R2 objects.
-          case "$BACKUP_TEMP_ROOT" in "$RUNNER_TEMP"/sharflow-backup-*) rm -rf -- "$BACKUP_TEMP_ROOT" ;; *) exit 1 ;; esac
+          case "$BACKUP_TEMP_ROOT" in /tmp/sharflow-backup-*) rm -rf -- "$BACKUP_TEMP_ROOT" ;; *) exit 1 ;; esac
           case "$BACKUP_RAM_ROOT" in /dev/shm/sharflow-backup-*) rm -rf -- "$BACKUP_RAM_ROOT" ;; *) exit 1 ;; esac
