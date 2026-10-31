@@ -1,0 +1,67 @@
+name: Encrypted MongoDB backup to R2
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-mongodb-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    # Production secrets may run only from reviewed code on main, including manual runs.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BACKUP_TEMP_ROOT: ${{ runner.temp }}/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
+      BACKUP_RAM_ROOT: /dev/shm/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test backup tools without service access
+        run: node --test scripts/backups/test-backup.js
+      - name: Install MongoDB Database Tools from the signed official repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://pgp.mongodb.com/server-8.0.asc |
+            sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+          echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse' |
+            sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mongodb-database-tools awscli
+          mongodump --version
+          aws --version
+          test -d /dev/shm
+          test "$(stat -f -c %T /dev/shm)" = tmpfs
+      - name: Dump, encrypt, upload and verify ciphertext
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          node scripts/backups/run.js
+      - name: Always remove private temporary files
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only these per-run paths may be removed; never workspace, DB, or R2 objects.
+          case "$BACKUP_TEMP_ROOT" in "$RUNNER_TEMP"/sharflow-backup-*) rm -rf -- "$BACKUP_TEMP_ROOT" ;; *) exit 1 ;; esac
+          case "$BACKUP_RAM_ROOT" in /dev/shm/sharflow-backup-*) rm -rf -- "$BACKUP_RAM_ROOT" ;; *) exit 1 ;; esac
