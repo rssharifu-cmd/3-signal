@@ -1,0 +1,205 @@
+name: Isolated MongoDB backup restore test
+
+on:
+  workflow_dispatch:
+    inputs:
+      object_key:
+        description: Previously verified encrypted R2 object
+        required: true
+        default: mongodb/2026/10/31/2026-10-31T16-46-49.316Z-2ebb2682-caac-4421-b50f-aa8063ba90e8.shfb
+      sha256:
+        description: Ciphertext SHA-256 from the successful backup run
+        required: true
+        default: 3538e2be7e74d200783034520bd796162b082b3ba23170a7fda64c00baef569b
+      source_db:
+        description: Source database stored in the archive
+        required: true
+        default: test
+
+permissions:
+  contents: read
+concurrency:
+  group: isolated-mongodb-restore-test
+  cancel-in-progress: false
+
+jobs:
+  restore-test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      RESTORE_RAM: /tmp/sharflow-restore-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install official tools without production credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://pgp.mongodb.com/server-8.0.asc |
+            sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/mongodb-server-8.0.gpg
+          echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse' |
+            sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mongodb-org-server mongodb-mongosh mongodb-database-tools curl unzip
+          if ! command -v aws >/dev/null; then
+            curl --fail --silent --show-error --location https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/aws-restore-tools.zip
+            unzip -q /tmp/aws-restore-tools.zip -d /tmp/restore-tools
+            sudo /tmp/restore-tools/aws/install --update
+          fi
+          mongod --version
+          mongorestore --version
+          aws --version
+      - name: Start loopback-only MongoDB on private RAM storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          # No disk-backed plaintext or swap; fail if the runner has active swap.
+          test "$(wc -l < /proc/swaps)" -eq 1
+          case "$RESTORE_RAM" in /tmp/sharflow-restore-*) ;; *) exit 1 ;; esac
+          mkdir -m 700 "$RESTORE_RAM"
+          sudo mount -t tmpfs -o size=2G,mode=0700,uid="$(id -u)",gid="$(id -g)" tmpfs "$RESTORE_RAM"
+          test "$(stat -f -c %T "$RESTORE_RAM")" = tmpfs
+          mkdir -m 700 "$RESTORE_RAM/db"
+          if ! env -i PATH="$PATH" HOME="$RESTORE_RAM" mongod --dbpath "$RESTORE_RAM/db" --bind_ip 127.0.0.1 --port 27028 --nounixsocket --wiredTigerCacheSizeGB 0.25 --setParameter ttlMonitorEnabled=false --logpath "$RESTORE_RAM/mongod.log" --fork > "$RESTORE_RAM/start.log" 2>&1; then
+            echo 'Isolated MongoDB startup failed; private logs suppressed.' >&2
+            exit 1
+          fi
+      - name: Download, authenticate, restore and validate without production URI
+        env:
+          BACKUP_OBJECT_KEY: ${{ inputs.object_key }}
+          EXPECTED_SHA256: ${{ inputs.sha256 }}
+          BACKUP_SOURCE_DB: ${{ inputs.source_db }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        shell: bash
+        run: |
+          set +x
+          set -euo pipefail
+          umask 077
+          python3 <<'PY'
+          import os, re, json, hashlib, subprocess, pathlib, sys
+          root = pathlib.Path(os.environ['RESTORE_RAM'])
+          stage = 'input validation'
+          base = {'PATH': os.environ['PATH'], 'HOME': str(root), 'LANG': 'C.UTF-8'}
+          def command(args, env=None, output=None):
+              result = subprocess.run(args, env=env or base, stdout=output or subprocess.PIPE,
+                                      stderr=output or subprocess.DEVNULL, timeout=300)
+              if result.returncode: raise RuntimeError('Subprocess failed')
+              return result.stdout.decode() if output is None else ''
+          try:
+              # No MongoDB source credential is present in this step or any subprocess.
+              obj = os.environ['BACKUP_OBJECT_KEY']
+              sha = os.environ['EXPECTED_SHA256']
+              source = os.environ['BACKUP_SOURCE_DB']
+              account = os.environ['R2_ACCOUNT_ID']
+              if not re.fullmatch(r'mongodb/\d{4}/\d{2}/\d{2}/[A-Za-z0-9_.-]+\.shfb', obj): raise ValueError()
+              if not re.fullmatch(r'[a-f0-9]{64}', sha): raise ValueError()
+              if not re.fullmatch(r'[A-Za-z0-9_-]+', source) or source in ['admin','config','local']: raise ValueError()
+              if not re.fullmatch(r'[a-fA-F0-9]{32}', account): raise ValueError()
+              if os.environ['R2_BUCKET_NAME'] != 'sharflow-backups': raise ValueError()
+              for name in ['BACKUP_ENCRYPTION_KEY','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY']:
+                  if not os.environ.get(name): raise ValueError()
+              awsenv = dict(base, AWS_ACCESS_KEY_ID=os.environ['R2_ACCESS_KEY_ID'],
+                            AWS_SECRET_ACCESS_KEY=os.environ['R2_SECRET_ACCESS_KEY'],
+                            AWS_EC2_METADATA_DISABLED='true', AWS_DEFAULT_REGION='auto',
+                            AWS_CONFIG_FILE=str(root/'no-config'), AWS_SHARED_CREDENTIALS_FILE=str(root/'no-credentials'),
+                            AWS_REQUEST_CHECKSUM_CALCULATION='when_required', AWS_RESPONSE_CHECKSUM_VALIDATION='when_required',
+                            AWS_PAGER='', AWS_MAX_ATTEMPTS='3')
+              aws = ['aws','--endpoint-url',f'https://{account}.r2.cloudflarestorage.com','--region','auto']
+              stage = 'encrypted download'
+              head = json.loads(command(aws+['s3api','head-object','--bucket','sharflow-backups','--key',obj,'--output','json'], awsenv))
+              if not 36 < head['ContentLength'] <= 64*1024*1024: raise ValueError('Restore drill size limit')
+              if head.get('Metadata',{}).get('sha256') != sha: raise ValueError()
+              encrypted = root/'backup.shfb'
+              command(aws+['s3','cp',f's3://sharflow-backups/{obj}',str(encrypted),'--only-show-errors','--no-progress'], awsenv)
+              if encrypted.stat().st_size != head['ContentLength']: raise ValueError()
+              if hashlib.sha256(encrypted.read_bytes()).hexdigest() != sha: raise ValueError()
+              stage = 'authenticated decryption'
+              plain = root/'restore.archive.gz'
+              cryptoenv = dict(base, BACKUP_ENCRYPTION_KEY=os.environ['BACKUP_ENCRYPTION_KEY'])
+              command(['node','scripts/backups/crypto.js','decrypt',str(encrypted),str(plain)], cryptoenv)
+              # Restore twice from the same authenticated archive, never connect to the live source.
+              # One local reference checks namespace remapping, options, indexes and counts.
+              for target in ['sharflow_restore_test_reference','sharflow_restore_test_target']:
+                  stage = 'isolated restore'
+                  log = root/(target+'.log')
+                  with log.open('xb') as private:
+                      command(['mongorestore','--host','127.0.0.1','--port','27028',
+                               '--archive='+str(plain),'--gzip','--stopOnError','--objcheck',
+                               '--nsInclude='+source+'.*','--nsFrom='+source+'.*','--nsTo='+target+'.*'], output=private)
+                  text = log.read_text()
+                  matches = re.findall(r'(\d+) document\(s\) restored successfully\. (\d+) document\(s\) failed to restore\.',text)
+                  if not matches or int(matches[-1][1]) != 0: raise ValueError('Missing restore completion')
+                  (root/(target+'.count')).write_text(matches[-1][0])
+              stage = 'collection and index validation'
+              verify = root/'verify.js'
+              verify.write_text(r'''
+          const fs = require('fs');
+          const root = process.env.HOME;
+          function inventory(name) {
+            const db = connect('mongodb://127.0.0.1:27028/' + name + '?directConnection=true');
+            const collections = db.getCollectionInfos().sort((a,b)=>a.name.localeCompare(b.name));
+            if (!collections.length) throw Error('No namespaces restored');
+            let total = 0, indexes = 0;
+            const items = collections.map(c => {
+              const coll = db.getCollection(c.name);
+              const view = c.type === 'view';
+              if (!view) {
+                const result = db.runCommand({validate:c.name,full:true});
+                if (result.ok !== 1 || result.valid !== true) throw Error('Collection validation failed');
+              }
+              const count = view ? null : coll.countDocuments({});
+              if (count !== null) total += count;
+              const defs = view ? [] : coll.getIndexes().map(i=>{delete i.ns;return i;}).sort((a,b)=>a.name.localeCompare(b.name));
+              indexes += defs.length;
+              return {name:c.name,type:c.type,options:c.options,count,indexes:defs};
+            });
+            const expected = Number(fs.readFileSync(root+'/'+name+'.count','utf8'));
+            if (!Number.isSafeInteger(expected) || total !== expected) throw Error('Archive/restored count mismatch');
+            return {items,total,indexes};
+          }
+          function stable(value) {
+            if (Array.isArray(value)) return value.map(stable);
+            if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(k=>[k,stable(value[k])]));
+            return value;
+          }
+          const reference=inventory('sharflow_restore_test_reference');
+          const target=inventory('sharflow_restore_test_target');
+          if (JSON.stringify(stable(reference)) !== JSON.stringify(stable(target))) throw Error('Remapped inventory mismatch');
+          fs.writeFileSync(root+'/result.json',JSON.stringify({status:'restore-test-passed',collections:target.items.length,documents:target.total,indexes:target.indexes,sourceComparison:'authenticated archive and isolated reference; live production not queried'}),{mode:0o600});
+          ''')
+              command(['mongosh','--quiet','--nodb','--file',str(verify)])
+              result = json.loads((root/'result.json').read_text())
+              result.update(object=obj,sha256=sha)
+              print(json.dumps(result))
+          except Exception:
+              print('Restore test failed during '+stage+'; private service output suppressed.', file=sys.stderr)
+              sys.exit(1)
+          finally:
+              for name in ['backup.shfb','restore.archive.gz','verify.js']:
+                  (root/name).unlink(missing_ok=True)
+          PY
+      - name: Always stop isolated MongoDB and release RAM storage
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$RESTORE_RAM" in /tmp/sharflow-restore-*) ;; *) exit 1 ;; esac
+          if mountpoint -q "$RESTORE_RAM"; then
+            if test -f "$RESTORE_RAM/db/mongod.lock" && test -s "$RESTORE_RAM/db/mongod.lock"; then
+              env -i PATH="$PATH" HOME="$RESTORE_RAM" mongod --shutdown --dbpath "$RESTORE_RAM/db" > /dev/null 2>&1
+            fi
+            sudo umount "$RESTORE_RAM"
+            rmdir "$RESTORE_RAM"
+          elif test -d "$RESTORE_RAM"; then
+            rmdir "$RESTORE_RAM"
+          fi
