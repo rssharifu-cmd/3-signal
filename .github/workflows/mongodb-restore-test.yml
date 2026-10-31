@@ -59,7 +59,8 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          # No disk-backed plaintext or swap; fail if the runner has active swap.
+          # Disable swap before downloading or decrypting any backup data.
+          sudo swapoff -a
           test "$(wc -l < /proc/swaps)" -eq 1
           case "$RESTORE_RAM" in /tmp/sharflow-restore-*) ;; *) exit 1 ;; esac
           mkdir -m 700 "$RESTORE_RAM"
