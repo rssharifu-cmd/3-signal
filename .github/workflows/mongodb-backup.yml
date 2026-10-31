@@ -39,7 +39,12 @@ jobs:
           echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse' |
             sudo tee /etc/apt/sources.list.d/mongodb-org-8.0.list > /dev/null
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mongodb-database-tools awscli
+          sudo apt-get install -y --no-install-recommends mongodb-database-tools curl unzip
+          curl --fail --silent --show-error --location \
+            "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" \
+            -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install
           mongodump --version
           aws --version
           test -d /dev/shm
