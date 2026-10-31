@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      BACKUP_TEMP_ROOT: ${{ runner.temp }}/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
+      case "$BACKUP_TEMP_ROOT" in /tmp/sharflow-backup-*) rm -rf -- "$BACKUP_TEMP_ROOT" ;; *) exit 1 ;; esac
       BACKUP_RAM_ROOT: /dev/shm/sharflow-backup-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
