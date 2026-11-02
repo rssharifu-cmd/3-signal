@@ -199,41 +199,8 @@ async function fetchPaddleConfig() {
 }
 
 async function initPaddle() {
-  if (paddleInitialized) return true;
-  await fetchPaddleConfig();
-
-  // Wait briefly if async Paddle script is loading
-  let attempts = 0;
-  while (!window.Paddle && attempts < 25) {
-    await new Promise((r) => setTimeout(r, 120));
-    attempts++;
-  }
-
-  if (!window.Paddle) {
-    console.warn("Paddle.js library is not available.");
-    return false;
-  }
-
-  try {
-    if (cachedPaddleConfig.env === "sandbox" && window.Paddle.Environment?.set) {
-      window.Paddle.Environment.set("sandbox");
-    }
-
-    if (cachedPaddleConfig.clientToken && window.Paddle.Initialize) {
-      const currentEmail = localStorage.getItem(STORAGE.email) || "";
-      window.Paddle.Initialize({
-        token: cachedPaddleConfig.clientToken,
-        pwCustomer: currentEmail ? { email: currentEmail } : undefined,
-        eventCallback: handlePaddleEvent,
-      });
-      paddleInitialized = true;
-      return true;
-    }
-    return false;
-  } catch (err) {
-    console.warn("Paddle initialization notice:", err.message);
-    return false;
-  }
+  // Paddle is not approved for Sharflow payments.
+  return false;
 }
 
 async function refreshUserPlanFromServer(retries = 4, delayMs = 2000) {
@@ -276,67 +243,9 @@ function handlePaddleEvent(data) {
   }
 }
 
-async function openPaddleCheckout(priceIdOverride) {
-  const priceId = priceIdOverride || cachedPaddleConfig.defaultPriceId || SHARFLOW_PRO_PRICE_ID;
-  const userEmail = localStorage.getItem(STORAGE.email) || "";
-
-  const initialized = await initPaddle();
-
-  if (!initialized || !cachedPaddleConfig.clientToken) {
-    console.info("[Paddle Checkout] Client token not configured yet. Checkout remains safely disabled during early access preview.");
-    toast("Sharflow Pro online checkout is currently in early-access mode. Contact hello@sharflow.online for early access.");
-    return;
-  }
-
-  let checkoutToken = null;
-  const token = localStorage.getItem(STORAGE.token);
-  if (token) {
-    try {
-      const res = await fetch("/api/user?action=checkout_token", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const d = await res.json();
-        if (d.ok && d.checkoutToken) {
-          checkoutToken = d.checkoutToken;
-        }
-      }
-    } catch (tokenErr) {
-      console.warn("[Paddle Checkout] Could not retrieve checkout link token:", tokenErr.message);
-    }
-  }
-
-  try {
-    if (window.Paddle && window.Paddle.Checkout && typeof window.Paddle.Checkout.open === "function") {
-      window.Paddle.Checkout.open({
-        settings: {
-          displayMode: "overlay",
-          theme: "light",
-          locale: "en",
-          successUrl: `${window.location.origin}/?checkout=success`,
-        },
-        items: [
-          {
-            priceId: priceId,
-            quantity: 1,
-          },
-        ],
-        customer: userEmail ? { email: userEmail } : undefined,
-        customData: {
-          checkoutToken: checkoutToken || undefined,
-          email: userEmail || undefined,
-          plan: "pro",
-          source: "sharflow_web",
-          priceId: priceId,
-        },
-      });
-    } else {
-      toast("Paddle checkout library is not available. Please try again later.");
-    }
-  } catch (err) {
-    console.error("Failed to open Paddle Checkout:", err);
-    toast("Paddle Checkout: " + (err.message || "Could not open checkout modal."));
-  }
+async function openPaddleCheckout() {
+  toast("Paid checkout is unavailable during pre-launch. Contact hello@sharflow.online for account assistance.");
+  return false;
 }
 
 function getUserEntitlements() {
@@ -400,7 +309,7 @@ function updateOverviewTrialBanner(entitlementsInput) {
 function startCheckout(planKey) {
   const normKey = planKey === "complete" ? "complete" : "analytics";
   // Friendly notice as fallback if price ID is not configured
-  toast("Billing opens shortly. We'll email you before your trial ends.");
+  toast("Paid checkout is unavailable during pre-launch. Final prices will be confirmed before paid launch.");
 }
 
 function checkoutSharflowPro() {
@@ -533,7 +442,7 @@ function updateBillingPanelUI() {
   if (actionContainer) {
     actionContainer.innerHTML = `
       <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:12px;text-align:center;color:#DC2626;font-size:13px;line-height:1.5;">
-        Select either Analytics ($9/mo) or Complete ($19/mo) below to reactivate daily monitoring.
+        Paid checkout is unavailable. Contact support about monitoring access.
       </div>
     `;
   }
