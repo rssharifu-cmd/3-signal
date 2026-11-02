@@ -374,8 +374,8 @@ async function fetchGa4Performance({
     eventsData.rows.forEach((r) => {
       const d = parseGa4Date(r.dimensionValues[0]?.value);
       const eventName = r.dimensionValues[1]?.value || "unknown";
-      const eventCount = Number(r.metricValues[0]?.value) || 0;
-      const eventValue = Number(r.metricValues[1]?.value) || 0;
+      const eventCount = metric(eventsData,r,'eventCount',0);
+      const eventValue = metric(eventsData,r,'eventValue',1);
 
       if (!eventsByDate[d]) eventsByDate[d] = [];
       eventsByDate[d].push({ eventName, eventCount, eventValue });
@@ -395,8 +395,8 @@ async function fetchGa4Performance({
       const source = r.dimensionValues[1]?.value || "(direct)";
       const medium = r.dimensionValues[2]?.value || "(none)";
       const campaign = r.dimensionValues[3]?.value || "(not set)";
-      const sessions = Number(r.metricValues[0]?.value) || 0;
-      const users = Number(r.metricValues[1]?.value) || 0;
+      const sessions = metric(trafficSourcesData,r,'sessions',0);
+      const users = metric(trafficSourcesData,r,'totalUsers',1);
 
       if (!sourcesByDate[d]) sourcesByDate[d] = [];
       sourcesByDate[d].push({
@@ -428,10 +428,10 @@ async function fetchGa4Performance({
     landingPagesData.rows.forEach((r) => {
       const d = parseGa4Date(r.dimensionValues[0]?.value);
       const pagePath = r.dimensionValues[1]?.value || "/";
-      const sessions = Number(r.metricValues[0]?.value) || 0;
-      const users = Number(r.metricValues[1]?.value) || 0;
-      const pageViews = Number(r.metricValues[2]?.value) || 0;
-      const bounceRate = Number(r.metricValues[3]?.value || 0);
+      const sessions = metric(landingPagesData,r,'sessions',0);
+      const users = metric(landingPagesData,r,'totalUsers',1);
+      const pageViews = metric(landingPagesData,r,'screenPageViews',2);
+      const bounceRate = metric(landingPagesData,r,'bounceRate',3);
 
       if (!landingPagesByDate[d]) landingPagesByDate[d] = [];
       landingPagesByDate[d].push({
@@ -440,7 +440,7 @@ async function fetchGa4Performance({
         sessions,
         users,
         pageViews,
-        bounceRate: Number(bounceRate.toFixed(4)),
+        bounceRate: bounceRate === null ? null : Number(bounceRate.toFixed(4)),
       });
     });
   }
@@ -452,14 +452,14 @@ async function fetchGa4Performance({
       const d = parseGa4Date(r.dimensionValues[0]?.value);
       const device = r.dimensionValues[1]?.value || "desktop";
       const country = r.dimensionValues[2]?.value || "Unknown";
-      const sessions = Number(r.metricValues[0]?.value) || 0;
-      const users = Number(r.metricValues[1]?.value) || 0;
+      const sessions = metric(deviceGeoData,r,'sessions',0);
+      const users = metric(deviceGeoData,r,'totalUsers',1);
 
       if (!devicesByDate[d]) devicesByDate[d] = {};
-      devicesByDate[d][device] = (devicesByDate[d][device] || 0) + sessions;
+      devicesByDate[d][device] = sessions === null || devicesByDate[d][device] === null ? null : (devicesByDate[d][device] ?? 0) + sessions;
 
       if (!countriesByDate[d]) countriesByDate[d] = {};
-      countriesByDate[d][country] = (countriesByDate[d][country] || 0) + sessions;
+      countriesByDate[d][country] = sessions === null || countriesByDate[d][country] === null ? null : (countriesByDate[d][country] ?? 0) + sessions;
     });
   }
 

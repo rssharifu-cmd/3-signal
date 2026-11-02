@@ -14,11 +14,13 @@
     "test:ga4": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-ga4-status.js",
     "test:paddle": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-paddle-webhook.js",
     "test:compliance": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-routes-and-compliance.js",
-    "test": "npm run test:security && npm run test:ga4 && npm run test:paddle && npm run test:plans && npm run test:research:isolated && npm run test:compliance",
+    "test": "npm run test:security && npm run test:evidence && npm run test:rendering && npm run test:ga4 && npm run test:paddle && npm run test:plans && npm run test:research:isolated && npm run test:compliance",
     "test:security": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-auth-security.js scripts/test-send-security.js scripts/test-watchdog-security.js scripts/test-oauth-security.js scripts/test-followup-security.js",
     "test:plans": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-plans.js",
     "test:research:isolated": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-research.js",
-    "check:security-indexes": "node scripts/check-security-indexes.js"
+    "check:security-indexes": "node scripts/check-security-indexes.js",
+    "test:evidence": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-report-evidence.js",
+    "test:rendering": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-report-rendering.js"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

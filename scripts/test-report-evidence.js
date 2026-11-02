@@ -59,7 +59,7 @@ test('new properties write independently without altering legacy history or crea
 });
 test('loadComparisonWindows uses provider latency rather than global latest cached date',async()=>{const data=rows(),db=database({metric_snapshots:data}),m=loader({db})('api/_lib/metricSnapshots.js');const w=await m.loadComparisonWindows({userEmail:data[0].userEmail,provider:data[0].provider,propertyRef:'property-A',targetDate:'2026-10-31'});assert.equal(w.targetDate,'2026-10-30');assert.equal(w.last28_vs_prior28.eligible,true);});
 function pipeline({sources=['google_search_console'],stored=[],fetchers={},intelligence={},userExtra={}}={}){
- const user={_id:'owner-id',email:'owner@example.test',name:'Owner',active:true,profile:{websiteUrl:'https://store.example.test'},...userExtra};
+ const user={_id:'owner-id',email:'owner@example.test',name:'Owner',active:true,emailVerifiedAt:new Date(NOW),authVersion:'fixture-session-version',profile:{websiteUrl:'https://store.example.test'},...userExtra};
  const db=database({users:[user],datasources:sources.map((provider,i)=>({_id:'source-'+i,userEmail:user.email,provider,status:'connected',encryptedRefreshToken:'synthetic',selectedProperty:{id:'property-A',url:'https://store.example.test'}})),metric_snapshots:stored});
  const calls=[];const fetcher=provider=>async args=>{calls.push(args);if(fetchers[provider] instanceof Error)throw fetchers[provider];return fetchers[provider] || rows(provider);};
  const overrides={'./gsc':{fetchGscPerformance:fetcher('google_search_console')},'./ga4':{fetchGa4Performance:fetcher('google_analytics')},'./bing':{fetchBingPerformance:fetcher('bing_webmaster')},
@@ -166,4 +166,20 @@ test('daily landing bounce rates are session-weighted and absent rates stay unkn
  const data=rows('google_analytics');for(const s of data)s.dimensions.landingPages=[{page:'/',sessions:10,users:5,pageViews:20,bounceRate:0}];data.at(-1).dimensions.landingPages[0]={page:'/',sessions:90,users:20,pageViews:100,bounceRate:1};
  assert.equal(windows(data).last7_vs_prior7.currentDimensions.landingPages[0].bounceRate,0.6);
  delete data.at(-1).dimensions.landingPages[0].bounceRate;assert.equal(windows(data).last7_vs_prior7.currentDimensions.landingPages[0].bounceRate,null);
+});
+
+for(const missing of [true,false])test('GA4 breakdown '+(missing?'missing values remain unknown':'observed zero values remain zero'),async()=>{
+ const load=loader({fetch:async(_url,options)=>{const body=JSON.parse(options.body),names=body.metrics.map(m=>m.name),dims=body.dimensions.map(d=>d.name);
+ if(dims.length===1)return ga4Response(body);
+ const dimensions=dims.map(d=>({value:d==='date'?'20261031':d==='eventName'?'purchase':'synthetic'}));
+ return apiResponse({metricHeaders:names.map(name=>({name})),metadata:{},rowCount:1,rows:[{dimensionValues:dimensions,metricValues:names.map(()=>missing?{}:{value:'0'})}]});}});
+ const r=(await load('api/_lib/ga4.js').fetchGa4Performance({accessToken:'synthetic',propertyRef:'properties/42'}))[0];const want=missing?null:0;
+ assert.equal(r.dimensions.landingPages[0].sessions,want);assert.equal(r.dimensions.landingPages[0].bounceRate,want);
+ assert.equal(r.dimensions.trafficSources[0].sessions,want);assert.equal(r.dimensions.events[0].eventCount,want);assert.equal(r.dimensions.devices[0].sessions,want);
+});
+for(const missing of [true,false])test('Bing positions '+(missing?'missing stay unknown':'observed zero is preserved'),async()=>{
+ const values=missing?{}:{Clicks:0,Impressions:0,AvgClickPosition:0,AvgImpressionPosition:0,InCrawlQueue:0};
+ const load=loader({fetch:async url=>apiResponse({d:String(url).includes('GetRankAndTrafficStats')||String(url).includes('GetQueryStats')?[{Date:'2026-10-31',Query:'test',...values}]:[]})});
+ const r=(await load('api/_lib/bing.js').fetchBingPerformance({accessToken:'synthetic',propertyRef:'https://example.test',startDate:'2026-10-01',endDate:'2026-10-31'}))[0];
+ assert.equal(r.metrics.position,missing?null:0);assert.equal(r.metrics.clicks,missing?null:0);assert.equal(r.dimensions.queries[0].position,missing?null:0);assert.equal(r.metrics.ctr,null);
 });

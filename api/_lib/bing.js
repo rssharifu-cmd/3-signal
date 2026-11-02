@@ -183,11 +183,11 @@ async function fetchBingPerformance({
       crawlByDate[d] = {
         crawledPages: numeric(cs.CrawledPages),
         crawlErrors: numeric(cs.CrawlErrors),
-        inCrawlQueue: cs.InCrawlQueue || 0,
-        code2xx: cs.Code2xx || 0,
-        code3xx: cs.Code3xx || 0,
-        code4xx: cs.Code4xx || 0,
-        code5xx: cs.Code5xx || 0,
+        inCrawlQueue: numeric(cs.InCrawlQueue),
+        code2xx: numeric(cs.Code2xx),
+        code3xx: numeric(cs.Code3xx),
+        code4xx: numeric(cs.Code4xx),
+        code5xx: numeric(cs.Code5xx),
       };
     }
   });
@@ -199,8 +199,8 @@ async function fetchBingPerformance({
     const query = qs.Query || "";
     const clicks = numeric(qs.Clicks);
     const impressions = numeric(qs.Impressions);
-    const avgPosition = qs.AvgClickPosition || qs.AvgImpressionPosition || 0;
-    const ctr = impressions > 0 ? Number((clicks / impressions).toFixed(4)) : 0;
+    const avgPosition = numeric(qs.AvgClickPosition) ?? numeric(qs.AvgImpressionPosition);
+    const ctr = clicks !== null && impressions > 0 ? Number((clicks / impressions).toFixed(4)) : null;
 
     if (d) {
       if (!queriesByDate[d]) queriesByDate[d] = [];
@@ -216,8 +216,8 @@ async function fetchBingPerformance({
       trafficByDate[d] = {
         clicks: numeric(ts.Clicks),
         impressions: numeric(ts.Impressions),
-        avgClickPosition: ts.AvgClickPosition || 0,
-        avgImpressionPosition: ts.AvgImpressionPosition || 0,
+        avgClickPosition: numeric(ts.AvgClickPosition),
+        avgImpressionPosition: numeric(ts.AvgImpressionPosition),
       };
     }
   });
@@ -240,8 +240,8 @@ async function fetchBingPerformance({
 
       const clicks = numeric(t.clicks);
       const impressions = numeric(t.impressions);
-      const ctr = impressions > 0 ? Number((clicks / impressions).toFixed(4)) : 0;
-      const position = Number((t.avgClickPosition || t.avgImpressionPosition || 0).toFixed(1));
+      const ctr = clicks !== null && impressions > 0 ? Number((clicks / impressions).toFixed(4)) : null;
+      const position = t.avgClickPosition ?? t.avgImpressionPosition ?? null;
 
       snapshots.push({
         provider: "bing_webmaster",
@@ -254,7 +254,7 @@ async function fetchBingPerformance({
           position,
           crawledPages: crawlComplete && c.crawledPages !== undefined ? c.crawledPages : null,
           crawlErrors: crawlComplete && c.crawlErrors !== undefined ? c.crawlErrors : null,
-          inCrawlQueue: c.inCrawlQueue || 0,
+          inCrawlQueue: c.inCrawlQueue ?? null,
         },
         dimensions: {
           queries: q.slice(0, 100),
