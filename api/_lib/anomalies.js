@@ -52,7 +52,8 @@ function verifySustainedDrop(dailySeries, metricName, priorDailyAvg) {
   }
   let daysBelow = 0;
   for (const day of dailySeries) {
-    const val = day.metrics?.[metricName] || 0;
+    const val = day.metrics?.[metricName];
+    if (!Number.isFinite(val)) continue;
     if (val < priorDailyAvg * 0.90) { // At least 10% below prior daily average
       daysBelow++;
     }
@@ -138,7 +139,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
   const gscWin = comparisonWindows.google_search_console || comparisonWindows.gsc;
   if (gscWin) {
     const w7d = gscWin.last7_vs_prior7;
-    if (w7d && w7d.priorMetrics && w7d.currentMetrics) {
+    if (w7d?.eligible === true && w7d.priorMetrics && w7d.currentMetrics) {
       const priorClicks = w7d.priorMetrics.clicks || 0;
       const currClicks = w7d.currentMetrics.clicks || 0;
       const clickDiff = w7d.changes.clicks;
@@ -233,7 +234,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
         // Check significant position drop (fell by >= 3.0 spots, higher number means worse rank)
         if (priorImp >= NOISE_FLOORS.queryImpressions7d && priorPos > 0 && currPos > 0) {
           const posDiff = currPos - priorPos; // Positive means position worsened
-          if (posDiff >= 3.0) {
+          if (priorPos > 0 && currPos > 0 && posDiff >= 3.0) {
             const fellOffPageOne = priorPos <= 10.0 && currPos > 10.0;
             const confidence = Number((0.75 + (fellOffPageOne ? 0.12 : 0.05) + Math.min(0.08, priorImp / 1000)).toFixed(2));
 
@@ -317,6 +318,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
       // 1E. New Page Gaining Traction
       for (const currP of currPages) {
         const priorP = priorPageMap.get(currP.page);
+        if (!priorP) continue; // An absent top-N row is not proof of historical zero traffic.
         const priorClicks = priorP?.clicks || 0;
         const priorImp = priorP?.impressions || 0;
         const currClicks = currP.clicks || 0;
@@ -356,7 +358,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
   const ga4Win = comparisonWindows.google_analytics || comparisonWindows.ga4;
   if (ga4Win) {
     const w7d = ga4Win.last7_vs_prior7;
-    if (w7d && w7d.priorMetrics && w7d.currentMetrics) {
+    if (w7d?.eligible === true && w7d.priorMetrics && w7d.currentMetrics) {
       const priorSessions = w7d.priorMetrics.sessions || 0;
       const currSessions = w7d.currentMetrics.sessions || 0;
       const priorConversions = w7d.priorMetrics.conversions || 0;
@@ -459,12 +461,13 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
           evidence: {
             metric: "revenue",
             provider: "google_analytics",
+            currencyCode: w7d.currentMetrics.currencyCode,
             currentRevenue: currRevenue,
             priorRevenue,
             absoluteChange: revDiff.absolute,
             changePercent: revDiff.percent,
             window: "last7_vs_prior7",
-            context: `Store revenue dropped ${Math.abs(revDiff.percent)}% over the last 7 days ($${currRevenue.toFixed(2)} vs $${priorRevenue.toFixed(2)} prior).`,
+            context: `Store revenue dropped ${Math.abs(revDiff.percent)}% over the last 7 days (${w7d.currentMetrics.currencyCode} ${currRevenue.toFixed(2)} vs ${priorRevenue.toFixed(2)} prior).`,
           },
           detectedAt,
         });
@@ -537,7 +540,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
             priorCartAdds,
             changePercent: cartDiff.percent,
             window: "last7_vs_prior7",
-            context: `Shopper add-to-cart actions dropped ${Math.abs(cartDiff.percent)}% over the last 7 days (${currCartAdds} vs ${priorCartAdds} prior).`,
+            context: `Items added to cart dropped ${Math.abs(cartDiff.percent)}% over the last 7 days (${currCartAdds} vs ${priorCartAdds} prior).`,
           },
           detectedAt,
         });
@@ -618,7 +621,8 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
 
       for (const pItem of priorAi) {
         const cItem = currAi.find((a) => a.platform === pItem.platform);
-        const cSess = cItem ? cItem.sessions : 0;
+        if (!cItem) continue;
+        const cSess = cItem.sessions;
         const pSess = pItem.sessions || 0;
 
         if (pSess >= 15 && cSess <= Math.floor(pSess * 0.4)) {
@@ -651,14 +655,14 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
   const bingWin = comparisonWindows.bing_webmaster || comparisonWindows.bing;
   if (bingWin) {
     const w7d = bingWin.last7_vs_prior7;
-    if (w7d && w7d.priorMetrics && w7d.currentMetrics) {
+    if (w7d?.eligible === true && w7d.priorMetrics && w7d.currentMetrics) {
       const priorErrors = w7d.priorMetrics.crawlErrors || 0;
       const currErrors = w7d.currentMetrics.crawlErrors || 0;
       const priorClicks = w7d.priorMetrics.clicks || 0;
       const currClicks = w7d.currentMetrics.clicks || 0;
 
       // 3A. Crawl Errors Spike
-      if (currErrors >= 5 && (currErrors > priorErrors * 2 || (priorErrors === 0 && currErrors >= 10))) {
+      if (Number.isFinite(w7d.priorMetrics.crawlErrors) && Number.isFinite(w7d.currentMetrics.crawlErrors) && currErrors >= 5 && (currErrors > priorErrors * 2 || (priorErrors === 0 && currErrors >= 10))) {
         findings.push({
           id: makeFindingId("organic_traffic_drop", "site", "bing_crawl_errors"),
           userId,
@@ -679,7 +683,7 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
       }
 
       // 3B. Bing Organic Traffic Drop
-      if (priorClicks >= 30 && (currClicks - priorClicks) / priorClicks <= -30.0) {
+      if (Number.isFinite(w7d.currentMetrics.clicks) && priorClicks >= 30 && (currClicks - priorClicks) / priorClicks <= -0.30) {
         findings.push({
           id: makeFindingId("organic_traffic_drop", "site", "bing_clicks"),
           userId,
@@ -761,15 +765,17 @@ function detectAnomalies({ userId, userEmail, comparisonWindows = {}, userProfil
   );
 
   if (!hasSearchTrafficFinding && (gscWin || bingWin)) {
-    const gsc28 = gscWin?.last28_vs_prior28;
-    const bing28 = bingWin?.last28_vs_prior28;
+    const gsc28 = gscWin?.last28_vs_prior28?.eligible === true ? gscWin.last28_vs_prior28 : null;
+    const bing28 = bingWin?.last28_vs_prior28?.eligible === true ? bingWin.last28_vs_prior28 : null;
 
     const gscDays = gsc28?.currentRange?.snapshotsCount || 0;
     const bingDays = bing28?.currentRange?.snapshotsCount || 0;
     const maxSearchDays = Math.max(gscDays, bingDays);
 
     // Require at least 7 daily snapshots in the 28d window so newly connected sites aren't prematurely flagged
-    if (maxSearchDays >= 7) {
+    const requiredSearchWindows=[gscWin?gsc28:null,bingWin?bing28:null].filter(Boolean);
+    const allSearchComplete=(!gscWin || Boolean(gsc28)) && (!bingWin || Boolean(bing28)) && requiredSearchWindows.length>0 && requiredSearchWindows.every(w=>[w.currentMetrics.clicks,w.priorMetrics.clicks,w.currentMetrics.impressions,w.priorMetrics.impressions].every(Number.isFinite));
+    if (maxSearchDays === 28 && allSearchComplete) {
       const totalClicks =
         (gsc28?.currentMetrics?.clicks || 0) +
         (gsc28?.priorMetrics?.clicks || 0) +

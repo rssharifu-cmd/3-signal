@@ -345,17 +345,26 @@ async function fetchGa4Performance({
     console.warn(`[GA4 Fetch] Failed to fetch device/geo breakdown for ${propertyRef}:`, err.message);
   }
 
+  const reportComplete = (report, cap=Infinity) => Boolean(report) && (report.rows || []).length < cap &&
+    (!report.rowCount || report.rowCount <= (report.rows || []).length) && !report.metadata?.subjectToThresholding && !report.metadata?.dataLossFromOtherRow && !(report.metadata?.samplingMetadatas?.length);
+  const metric = (report,row,name,index) => {
+    const actual=report.metricHeaders?.length ? report.metricHeaders.findIndex(h=>h.name===name) : index;
+    const value=actual<0?undefined:row.metricValues[actual]?.value;
+    if(value===undefined || value===null || value==='')return null;
+    const number=Number(value);return Number.isFinite(number)&&(number>=0||name==='purchaseRevenue')?number:null;
+  };
+  const ecommerceComplete=reportComplete(ecommerceData);
   // ── Index Breakdown Data by Normalized Date (YYYY-MM-DD) ───────────────────
   const ecomByDate = {};
   if (ecommerceData?.rows) {
     ecommerceData.rows.forEach((r) => {
       const d = parseGa4Date(r.dimensionValues[0]?.value);
       ecomByDate[d] = {
-        purchases: Number(r.metricValues[0]?.value) || 0,
-        revenue: Number(Number(r.metricValues[1]?.value || 0).toFixed(2)),
-        itemsAddedToCart: Number(r.metricValues[2]?.value) || 0,
-        itemsCheckedOut: Number(r.metricValues[3]?.value) || 0,
-        itemsViewed: Number(r.metricValues[4]?.value) || 0,
+        purchases: metric(ecommerceData,r,'ecommercePurchases',0),
+        revenue: metric(ecommerceData,r,'purchaseRevenue',1),
+        itemsAddedToCart: metric(ecommerceData,r,'itemsAddedToCart',2),
+        itemsCheckedOut: metric(ecommerceData,r,'itemsCheckedOut',3),
+        itemsViewed: metric(ecommerceData,r,'itemsViewed',4),
       };
     });
   }
@@ -461,38 +470,25 @@ async function fetchGa4Performance({
   if (dailyRows.length > 0) {
     for (const r of dailyRows) {
       const dateStr = parseGa4Date(r.dimensionValues[0]?.value);
-      const sessions = Number(r.metricValues[0]?.value) || 0;
-      const totalUsers = Number(r.metricValues[1]?.value) || 0;
-      const newUsers = r.metricValues.length > 4 ? Number(r.metricValues[2]?.value) || 0 : 0;
-      const pageViews = r.metricValues.length > 4 ? Number(r.metricValues[3]?.value) || 0 : Number(r.metricValues[2]?.value) || 0;
-      const engagementRate = r.metricValues.length > 4 ? Number(Number(r.metricValues[4]?.value || 0).toFixed(4)) : null;
-      const userEngagementDuration = r.metricValues.length > 5 ? Number(Number(r.metricValues[5]?.value || 0).toFixed(1)) : 0;
-      const bounceRate = r.metricValues.length > 6 ? Number(Number(r.metricValues[6]?.value || 0).toFixed(4)) : Number(Number(r.metricValues[3]?.value || 0).toFixed(4));
-
-      // Calculate returning users safely
-      const returningUsers = Math.max(0, totalUsers - newUsers);
+      const extended=r.metricValues.length>4;
+      const sessions=metric(dailyData,r,'sessions',0),totalUsers=metric(dailyData,r,'totalUsers',1);
+      const newUsers=metric(dailyData,r,'newUsers',extended?2:-1);
+      const pageViews=metric(dailyData,r,'screenPageViews',extended?3:2);
+      const engagementRate=metric(dailyData,r,'engagementRate',extended?4:-1);
+      const userEngagementDuration=metric(dailyData,r,'userEngagementDuration',extended?5:-1);
+      const bounceRate=metric(dailyData,r,'bounceRate',extended?6:3);
+      const returningUsers=null; // Daily unique users minus new users is not a returning-user metric.
 
       // Merge E-Commerce Metrics
       const ecom = ecomByDate[dateStr] || null;
       const dayEvents = eventsByDate[dateStr] || [];
 
-      // Event counts for e-commerce funnel fallback
-      const getEventCount = (name) => {
-        const ev = dayEvents.find((e) => e.eventName.toLowerCase() === name.toLowerCase());
-        return ev ? ev.eventCount : 0;
-      };
+      // Missing/failed ecommerce reports are unknown, never an eventValue/revenue substitute.
+      const value=name=>ecommerceComplete ? (ecom ? ecom[name] : 0) : null;
+      const viewItemCount=value('itemsViewed'),addToCartCount=value('itemsAddedToCart'),checkoutCount=value('itemsCheckedOut'),purchaseCount=value('purchases'),revenue=value('revenue');
 
-      const viewItemCount = ecom?.itemsViewed ?? getEventCount("view_item");
-      const addToCartCount = ecom?.itemsAddedToCart ?? getEventCount("add_to_cart");
-      const checkoutCount = ecom?.itemsCheckedOut ?? getEventCount("begin_checkout");
-      const purchaseCount = ecom?.purchases ?? getEventCount("purchase");
-      const revenue = ecom?.revenue ?? (dayEvents.find((e) => e.eventName.toLowerCase() === "purchase")?.eventValue || null);
-
-      // Deterministic Conversion Rates
-      const addToCartRate = sessions > 0 && addToCartCount > 0 ? Number(((addToCartCount / sessions) * 100).toFixed(2)) : null;
-      const checkoutRate = sessions > 0 && checkoutCount > 0 ? Number(((checkoutCount / sessions) * 100).toFixed(2)) : null;
-      const purchaseConversionRate = sessions > 0 && purchaseCount > 0 ? Number(((purchaseCount / sessions) * 100).toFixed(2)) : null;
-      const checkoutToPurchaseRate = checkoutCount > 0 && purchaseCount > 0 ? Number(((purchaseCount / checkoutCount) * 100).toFixed(2)) : null;
+      // Native counts are item quantities, not checkout/add-to-cart events. No inferred conversion rate.
+      const addToCartRate=null,checkoutRate=null,purchaseConversionRate=null,checkoutToPurchaseRate=null;
 
       const trafficSources = (sourcesByDate[dateStr] || []).sort((a, b) => b.sessions - a.sessions);
       const aiReferrals = (aiReferralsByDate[dateStr] || []).sort((a, b) => b.sessions - a.sessions);
@@ -514,22 +510,24 @@ async function fetchGa4Performance({
           returningUsers,
           pageViews,
           engagementRate,
-          averageEngagementTime: sessions > 0 ? Number((userEngagementDuration / sessions).toFixed(1)) : 0,
+          averageEngagementTime: sessions > 0 && userEngagementDuration!==null ? Number((userEngagementDuration / sessions).toFixed(1)) : null,
           bounceRate,
           // E-Commerce Core Metrics (null when unconfigured/unavailable)
           ecommerceConfigured,
+          funnelUnits: "items",
           viewItemCount: ecommerceConfigured ? viewItemCount : null,
           addToCartCount: ecommerceConfigured ? addToCartCount : null,
           checkoutCount: ecommerceConfigured ? checkoutCount : null,
           purchaseCount: ecommerceConfigured ? purchaseCount : null,
           revenue: ecommerceConfigured ? revenue : null,
+          currencyCode: ecommerceData?.metadata?.currencyCode || null,
           // Funnel Conversion Rates (%)
           addToCartRate,
           checkoutRate,
           purchaseConversionRate,
           checkoutToPurchaseRate,
           // Legacy backwards-compatibility
-          conversions: purchaseCount > 0 ? purchaseCount : getEventCount("conversion"),
+          conversions: purchaseCount,
         },
         dimensions: {
           trafficSources: trafficSources.slice(0, 50),
@@ -542,49 +540,18 @@ async function fetchGa4Performance({
         },
       });
     }
-  } else {
-    // Provide baseline empty snapshot
-    snapshots.push({
-      provider: "google_analytics",
-      propertyRef,
-      date: range.endDate,
-      metrics: {
-        sessions: 0,
-        users: 0,
-        totalUsers: 0,
-        newUsers: 0,
-        returningUsers: 0,
-        pageViews: 0,
-        engagementRate: null,
-        averageEngagementTime: 0,
-        bounceRate: 0,
-        ecommerceConfigured: false,
-        viewItemCount: null,
-        addToCartCount: null,
-        checkoutCount: null,
-        purchaseCount: null,
-        revenue: null,
-        addToCartRate: null,
-        checkoutRate: null,
-        purchaseConversionRate: null,
-        checkoutToPurchaseRate: null,
-        conversions: 0,
-      },
-      dimensions: {
-        trafficSources: [],
-        aiReferrals: [],
-        landingPages: [],
-        pages: [],
-        events: [],
-        devices: [],
-        countries: [],
-      },
-    });
   }
 
   // Sort chronological ascending
   snapshots.sort((a, b) => a.date.localeCompare(b.date));
 
+  for (const snapshot of snapshots) snapshot.dataQuality={daily:reportComplete(dailyData),dimensions:{
+    trafficSources:reportComplete(trafficSourcesData,2500) && snapshot.dimensions.trafficSources.length<50,
+    landingPages:reportComplete(landingPagesData,2500) && snapshot.dimensions.landingPages.length<50,
+    pages:reportComplete(landingPagesData,2500) && snapshot.dimensions.pages.length<50,
+    events:reportComplete(eventsData,2500) && snapshot.dimensions.events.length<50,
+    devices:reportComplete(deviceGeoData,2500)},
+    warnings:!ecommerceComplete || !reportComplete(eventsData,2500) || !reportComplete(trafficSourcesData,2500) || !reportComplete(landingPagesData,2500) || !reportComplete(deviceGeoData,2500) ? ['GA4 optional evidence incomplete'] : []};
   return snapshots;
 }
 

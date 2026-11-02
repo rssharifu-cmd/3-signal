@@ -1,3 +1,4 @@
+const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 /**
  * Sharflow — Bing Webmaster Tools Performance Data Fetcher
  *
@@ -140,10 +141,11 @@ async function fetchBingPerformance({
 
   // 1. Fetch traffic & ranking stats
   let trafficStats = [];
+  let queriesComplete=true, crawlComplete=true, issuesComplete=true;
   try {
     trafficStats = await callBingApi("GetRankAndTrafficStats", propertyRef, accessToken);
   } catch (err) {
-    console.warn(`[Bing Fetch] GetRankAndTrafficStats failed for ${propertyRef}:`, err.message);
+    throw new Error("Bing daily traffic request failed");
   }
 
   // 2. Fetch query-level stats
@@ -151,6 +153,7 @@ async function fetchBingPerformance({
   try {
     queryStats = await callBingApi("GetQueryStats", propertyRef, accessToken);
   } catch (err) {
+    queriesComplete=false;
     console.warn(`[Bing Fetch] GetQueryStats failed for ${propertyRef}:`, err.message);
   }
 
@@ -159,6 +162,7 @@ async function fetchBingPerformance({
   try {
     crawlStats = await callBingApi("GetCrawlStats", propertyRef, accessToken);
   } catch (err) {
+    crawlComplete=false;
     console.warn(`[Bing Fetch] GetCrawlStats failed for ${propertyRef}:`, err.message);
   }
 
@@ -167,6 +171,7 @@ async function fetchBingPerformance({
   try {
     crawlIssues = await callBingApi("GetCrawlIssues", propertyRef, accessToken);
   } catch (err) {
+    issuesComplete=false;
     console.warn(`[Bing Fetch] GetCrawlIssues failed for ${propertyRef}:`, err.message);
   }
 
@@ -176,8 +181,8 @@ async function fetchBingPerformance({
     const d = parseBingDate(cs.CrawlDate || cs.Date);
     if (d) {
       crawlByDate[d] = {
-        crawledPages: cs.CrawledPages || 0,
-        crawlErrors: cs.CrawlErrors || 0,
+        crawledPages: numeric(cs.CrawledPages),
+        crawlErrors: numeric(cs.CrawlErrors),
         inCrawlQueue: cs.InCrawlQueue || 0,
         code2xx: cs.Code2xx || 0,
         code3xx: cs.Code3xx || 0,
@@ -192,8 +197,8 @@ async function fetchBingPerformance({
   queryStats.forEach((qs) => {
     const d = parseBingDate(qs.Date);
     const query = qs.Query || "";
-    const clicks = qs.Clicks || 0;
-    const impressions = qs.Impressions || 0;
+    const clicks = numeric(qs.Clicks);
+    const impressions = numeric(qs.Impressions);
     const avgPosition = qs.AvgClickPosition || qs.AvgImpressionPosition || 0;
     const ctr = impressions > 0 ? Number((clicks / impressions).toFixed(4)) : 0;
 
@@ -209,8 +214,8 @@ async function fetchBingPerformance({
     const d = parseBingDate(ts.Date);
     if (d) {
       trafficByDate[d] = {
-        clicks: ts.Clicks || 0,
-        impressions: ts.Impressions || 0,
+        clicks: numeric(ts.Clicks),
+        impressions: numeric(ts.Impressions),
         avgClickPosition: ts.AvgClickPosition || 0,
         avgImpressionPosition: ts.AvgImpressionPosition || 0,
       };
@@ -218,11 +223,7 @@ async function fetchBingPerformance({
   });
 
   // Collect all unique dates found across traffic, queries, and crawl stats
-  const allDates = new Set([
-    ...Object.keys(trafficByDate),
-    ...Object.keys(queriesByDate),
-    ...Object.keys(crawlByDate),
-  ]);
+  const allDates = new Set(Object.keys(trafficByDate));
 
   const snapshots = [];
 
@@ -237,8 +238,8 @@ async function fetchBingPerformance({
 
       q.sort((a, b) => b.clicks - a.clicks || b.impressions - a.impressions);
 
-      const clicks = t.clicks || 0;
-      const impressions = t.impressions || 0;
+      const clicks = numeric(t.clicks);
+      const impressions = numeric(t.impressions);
       const ctr = impressions > 0 ? Number((clicks / impressions).toFixed(4)) : 0;
       const position = Number((t.avgClickPosition || t.avgImpressionPosition || 0).toFixed(1));
 
@@ -251,8 +252,8 @@ async function fetchBingPerformance({
           impressions,
           ctr,
           position,
-          crawledPages: c.crawledPages || 0,
-          crawlErrors: c.crawlErrors || 0,
+          crawledPages: crawlComplete && c.crawledPages !== undefined ? c.crawledPages : null,
+          crawlErrors: crawlComplete && c.crawlErrors !== undefined ? c.crawlErrors : null,
           inCrawlQueue: c.inCrawlQueue || 0,
         },
         dimensions: {
@@ -263,30 +264,9 @@ async function fetchBingPerformance({
     }
   }
 
-  // If no date entries within range, return baseline snapshot
-  if (snapshots.length === 0) {
-    snapshots.push({
-      provider: "bing_webmaster",
-      propertyRef,
-      date: range.endDate,
-      metrics: {
-        clicks: 0,
-        impressions: 0,
-        ctr: 0,
-        position: 0,
-        crawledPages: 0,
-        crawlErrors: 0,
-        inCrawlQueue: 0,
-      },
-      dimensions: {
-        queries: [],
-        crawlIssues: crawlIssues.slice(0, 20),
-      },
-    });
-  }
-
   snapshots.sort((a, b) => a.date.localeCompare(b.date));
 
+  for (const snapshot of snapshots) snapshot.dataQuality={daily:true, dimensions:{queries:queriesComplete && snapshot.dimensions.queries.length<100, crawlIssues:false}, warnings:!queriesComplete||!crawlComplete||!issuesComplete ? ["Bing optional evidence unavailable"] : []};
   return snapshots;
 }
 

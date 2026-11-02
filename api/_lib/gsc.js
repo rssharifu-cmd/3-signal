@@ -1,3 +1,5 @@
+const numeric = value => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+const rounded = (value,places) => numeric(value) === null ? null : Number(value.toFixed(places));
 /**
  * Sharflow — Google Search Console Performance Data Fetcher
  *
@@ -112,7 +114,7 @@ async function fetchGscPerformance({
   });
 
   // 2. Fetch page-level performance grouped by date and page
-  let pageRows = [];
+  let pageRows = [], pagesComplete = true, queriesComplete = true;
   try {
     pageRows = await runSearchAnalyticsQuery(accessToken, propertyRef, {
       startDate: range.startDate,
@@ -121,6 +123,7 @@ async function fetchGscPerformance({
       rowLimit: 5000,
     });
   } catch (err) {
+    pagesComplete = false;
     console.warn(`[GSC Fetch] Failed to fetch page-level breakdown for ${propertyRef}:`, err.message);
   }
 
@@ -134,6 +137,7 @@ async function fetchGscPerformance({
       rowLimit: 5000,
     });
   } catch (err) {
+    queriesComplete = false;
     console.warn(`[GSC Fetch] Failed to fetch query-level breakdown for ${propertyRef}:`, err.message);
   }
 
@@ -145,10 +149,10 @@ async function fetchGscPerformance({
     if (!pagesByDate[d]) pagesByDate[d] = [];
     pagesByDate[d].push({
       page: pageUrl,
-      clicks: r.clicks || 0,
-      impressions: r.impressions || 0,
-      ctr: Number((r.ctr || 0).toFixed(4)),
-      position: Number((r.position || 0).toFixed(1)),
+      clicks: numeric(r.clicks),
+      impressions: numeric(r.impressions),
+      ctr: rounded(r.ctr,4),
+      position: rounded(r.position,1),
     });
   });
 
@@ -160,10 +164,10 @@ async function fetchGscPerformance({
     if (!queriesByDate[d]) queriesByDate[d] = [];
     queriesByDate[d].push({
       query: queryStr,
-      clicks: r.clicks || 0,
-      impressions: r.impressions || 0,
-      ctr: Number((r.ctr || 0).toFixed(4)),
-      position: Number((r.position || 0).toFixed(1)),
+      clicks: numeric(r.clicks),
+      impressions: numeric(r.impressions),
+      ctr: rounded(r.ctr,4),
+      position: rounded(r.position,1),
     });
   });
 
@@ -186,10 +190,10 @@ async function fetchGscPerformance({
         propertyRef,
         date: dateStr,
         metrics: {
-          clicks: r.clicks || 0,
-          impressions: r.impressions || 0,
-          ctr: Number((r.ctr || 0).toFixed(4)),
-          position: Number((r.position || 0).toFixed(1)),
+          clicks: numeric(r.clicks),
+          impressions: numeric(r.impressions),
+          ctr: rounded(r.ctr,4),
+          position: rounded(r.position,1),
         },
         dimensions: {
           pages: pages.slice(0, 100), // Top 100 pages for the day
@@ -197,29 +201,12 @@ async function fetchGscPerformance({
         },
       });
     }
-  } else {
-    // If no rows returned (brand new site or zero search traffic in window),
-    // provide a clean baseline snapshot for the end date so pipeline has a valid record
-    snapshots.push({
-      provider: "google_search_console",
-      propertyRef,
-      date: range.endDate,
-      metrics: {
-        clicks: 0,
-        impressions: 0,
-        ctr: 0,
-        position: 0,
-      },
-      dimensions: {
-        pages: [],
-        queries: [],
-      },
-    });
   }
 
   // Sort chronological ascending
   snapshots.sort((a, b) => a.date.localeCompare(b.date));
 
+  for (const snapshot of snapshots) snapshot.dataQuality = {daily:true, dimensions:{pages:pagesComplete && pageRows.length<5000 && snapshot.dimensions.pages.length<100, queries:queriesComplete && queryRows.length<5000 && snapshot.dimensions.queries.length<100}};
   return snapshots;
 }
 

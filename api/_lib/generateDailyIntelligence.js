@@ -26,7 +26,9 @@ const { fetchBingPerformance } = require("./bing");
 const {
   saveMetricSnapshots,
   loadComparisonWindows,
-  getLatestSnapshotDate,
+  providerDate,
+  shiftDate,
+  validDate,
 } = require("./metricSnapshots");
 const { detectAnomalies } = require("./anomalies");
 const {
@@ -37,6 +39,14 @@ const {
 const { normalizeMonitoringPreferences } = require("./preferences");
 const { searchWeb, fetchRssFeed, searchReddit, GOOGLE_SEARCH_CENTRAL_FEED } = require("./research");
 const { getEntitlements } = require("./plans");
+
+async function preservePreviousEvidence(db, report) {
+  if (report.status!=='insufficient_data' && report.status!=='no_sources' && !report.coverageIncomplete) return;
+  const prior=await db.collection('intelligence_reports').findOne({userEmail:report.userEmail,targetDate:report.targetDate});
+  if (!prior) return;
+  const verified=(prior.findings || []).filter(f=>f.evidence && f.confidence>=0.7);
+  report.previousVerifiedEvidence=verified.length ? {reportId:prior.reportId,generatedAt:prior.generatedAt,currentlyRevalidated:false,findings:verified} : prior.previousVerifiedEvidence || null;
+}
 
 /**
  * Maps raw provider identifiers to display labels.
@@ -227,6 +237,7 @@ async function generateDailyIntelligence(userId, options = {}) {
   const userEmail = user.email;
   const stringUserId = String(user._id);
   const now = new Date();
+  if (options.targetDate && (!validDate(options.targetDate) || options.targetDate > shiftDate(now.toISOString().slice(0,10),-1))) throw Error("Report target must be a valid completed UTC day");
 
   // ── 1. RETRIEVE CONNECTED DATA SOURCES ────────────────────────────────────
   const datasourcesCol = db.collection("datasources");
@@ -258,14 +269,7 @@ async function generateDailyIntelligence(userId, options = {}) {
   // - Return clear "no_sources" / "Monitoring not active" state
   // - Do NOT call Gemini, external research, or invent metrics
   if (allowedSources.length === 0) {
-    let targetDate = options.targetDate;
-    if (!targetDate) {
-      targetDate = await getLatestSnapshotDate({ userEmail });
-    }
-    if (!targetDate) {
-      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      targetDate = yesterday.toISOString().split("T")[0];
-    }
+    const targetDate = options.targetDate || shiftDate(now.toISOString().slice(0,10),-1);
 
     const reportId = new ObjectId();
     let intelligence;
@@ -335,6 +339,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     };
 
     if (!options.dryRun) {
+      await preservePreviousEvidence(db,report);
       const reportsCol = db.collection("intelligence_reports");
       await reportsCol.updateOne(
         { userEmail, targetDate },
@@ -385,19 +390,28 @@ async function generateDailyIntelligence(userId, options = {}) {
           snapshots = await fetchGscPerformance({
             userEmail,
             propertyRef,
+            endDate: providerDate(provider,now),
+            startDate: shiftDate(providerDate(provider,now),-55),
           });
         } else if (provider === "google_analytics") {
           snapshots = await fetchGa4Performance({
             userEmail,
             propertyRef,
+            endDate: providerDate(provider,now),
+            startDate: shiftDate(providerDate(provider,now),-55),
           });
         } else if (provider === "bing_webmaster" || provider === "bing") {
           snapshots = await fetchBingPerformance({
             userEmail,
             propertyRef,
+            endDate: providerDate(provider,now),
+            startDate: shiftDate(providerDate(provider,now),-55),
           });
         }
 
+        if (Array.isArray(snapshots) && snapshots.some(row=>row.dataQuality?.daily===false)) throw Error('Daily totals are incomplete, thresholded or sampled');
+        if (!Array.isArray(snapshots) || snapshots.length===0) throw Error('No observed daily rows returned; zero traffic cannot be inferred');
+        if (snapshots.some(row=>row.provider!==provider || String(row.propertyRef)!==String(propertyRef))) throw Error('Provider returned mismatched property evidence');
         // Tag with userId and userEmail
         snapshots.forEach((s) => {
           s.userId = stringUserId;
@@ -436,15 +450,7 @@ async function generateDailyIntelligence(userId, options = {}) {
   }
 
   // ── 3. LOAD HISTORICAL COMPARISON WINDOWS (STEP 2) ────────────────────────
-  // Anchor target date: options.targetDate -> latest snapshot in DB -> yesterday
-  let targetDate = options.targetDate;
-  if (!targetDate) {
-    targetDate = await getLatestSnapshotDate({ userEmail });
-  }
-  if (!targetDate) {
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    targetDate = yesterday.toISOString().split("T")[0];
-  }
+  const targetDate = options.targetDate || shiftDate(now.toISOString().slice(0,10),-1);
 
   const comparisonWindowsByProvider = {};
   const usableWindowsByProvider = {};
@@ -477,7 +483,9 @@ async function generateDailyIntelligence(userId, options = {}) {
         userId: stringUserId,
         userEmail,
         provider: prov,
+        propertyRef: sourceObj?.selectedProperty?.id,
         targetDate,
+        now,
       });
       comparisonWindowsByProvider[prov] = windows;
     } catch (err) {
@@ -485,14 +493,15 @@ async function generateDailyIntelligence(userId, options = {}) {
     }
 
     const totalLoaded = windows?.totalSnapshotsLoaded || 0;
-    if (totalLoaded < 2) {
+    const weeklyComplete=windows?.last7_vs_prior7?.eligible === true;
+    if (!weeklyComplete) {
       unusableProviders.push({
         provider: prov,
         name: displayName,
         propertyRef: sourceObj?.selectedProperty?.id,
         reason: totalLoaded === 0
           ? "No metric snapshots found for this provider"
-          : "Insufficient historical baseline data (at least 2 daily snapshots required to evaluate trends)",
+          : "Comparison requires complete, fresh, property-isolated current and prior seven-day periods",
         snapshotsLoaded: totalLoaded,
       });
     } else {
@@ -501,6 +510,8 @@ async function generateDailyIntelligence(userId, options = {}) {
         name: displayName,
         propertyRef: sourceObj?.selectedProperty?.id,
         snapshotsLoaded: totalLoaded,
+        partialCoverage: Object.values(windows).some(w=>w && typeof w==='object' && w.window && !w.eligible) ||
+          [windows.last7_vs_prior7.currentMetrics,windows.last7_vs_prior7.priorMetrics].some(m=> (prov==='google_analytics' ? ['sessions','conversions','revenue','addToCartCount','checkoutCount','purchaseCount','checkoutToPurchaseRate','engagementRate'] : ['clicks','impressions','position']).some(k=>m[k]===null)),
       });
       usableWindowsByProvider[prov] = windows;
     }
@@ -602,6 +613,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     };
 
     if (!options.dryRun) {
+      await preservePreviousEvidence(db,report);
       const reportsCol = db.collection("intelligence_reports");
       await reportsCol.updateOne(
         { userEmail, targetDate },
@@ -678,6 +690,10 @@ async function generateDailyIntelligence(userId, options = {}) {
     urlInspection: urlInspectionResult,
   });
 
+  const coverageIncomplete=unusableProviders.length>0 || usableProviders.some(p=>p.partialCoverage) ||
+    Object.values(usableWindowsByProvider).some(w=>!w.last7_vs_prior7.coverage.dimensionsComplete || !w.last7_vs_prior7.coverage.unitsCompatible) ||
+    newSnapshots.some(row=>row.dataQuality?.warnings?.length || Object.values(row.dataQuality?.dimensions || {}).some(value=>value===false));
+
   // ── 5. CONDITIONAL TARGETED EXTERNAL RESEARCH (STEP 4) ────────────────────
   // Strictly skipped if findings is empty
   const websiteUrl = user.profile?.websiteUrl || activeSourcesWithProperty[0]?.selectedProperty?.url || "";
@@ -697,7 +713,7 @@ async function generateDailyIntelligence(userId, options = {}) {
     user.profile?.websiteType
   );
 
-  const intelligence = await interpretFindings({
+  let intelligence = await interpretFindings({
     findings,
     userContext: {
       userId: stringUserId,
@@ -712,6 +728,13 @@ async function generateDailyIntelligence(userId, options = {}) {
     usableProviders,
     unusableProviders,
   });
+
+  const severityStatus=findings.some(f=>f.severity==='critical')?'critical':findings.some(f=>f.severity==='warning')?'warning':findings.length?'opportunity':coverageIncomplete?'insufficient_data':'stable';
+  const described=new Map((intelligence.priorityRankedFindings || []).map(f=>[f.id,f]));
+  intelligence={...intelligence,status:severityStatus,priorityRankedFindings:findings.map(f=>({...described.get(f.id),...f}))};
+  if (!findings.length) intelligence={...intelligence,headline:coverageIncomplete?'Monitoring evidence incomplete':'No significant changes in evaluated periods',
+    summary:coverageIncomplete?'Some providers, periods, metrics or breakdowns could not be evaluated. Overall business stability cannot be confirmed.':'No deterministic anomaly cleared its threshold in the complete evaluated periods. This does not establish technical health or coverage beyond these sources.',
+    recommendedActions:coverageIncomplete?[{action:'Review missing evidence and allow complete comparison history',detail:'Check provider availability, period coverage and metric units.',urgency:'routine'}]:[]};
 
   // ── 7. COMPILE FINAL REPORT ───────────────────────────────────────────────
   const reportId = new ObjectId();
@@ -775,10 +798,10 @@ async function generateDailyIntelligence(userId, options = {}) {
   ];
 
   // ── 7.5 ASSEMBLE STORE PERFORMANCE SUMMARY (GA4 PRIMARY) ─────────────────
-  const ga4Windows = usableWindowsByProvider.google_analytics || comparisonWindowsByProvider.google_analytics || null;
+  const ga4Windows = usableWindowsByProvider.google_analytics || null;
   let storePerformance = null;
   if (ga4Windows) {
-    const todayWin = ga4Windows.today_vs_yesterday;
+    const todayWin = ga4Windows.today_vs_yesterday?.eligible ? ga4Windows.today_vs_yesterday : null;
     const weekWin = ga4Windows.last7_vs_prior7;
     const latestMetrics = todayWin?.currentMetrics || weekWin?.currentMetrics || null;
     const changes = todayWin?.changes || weekWin?.changes || {};
@@ -787,18 +810,22 @@ async function generateDailyIntelligence(userId, options = {}) {
     if (latestMetrics) {
       storePerformance = {
         configured: Boolean(latestMetrics.ecommerceConfigured),
-        sessions: latestMetrics.sessions || 0,
-        users: latestMetrics.users || latestMetrics.totalUsers || 0,
-        newUsers: latestMetrics.newUsers || 0,
+        window: todayWin?.window || weekWin?.window,
+        dateRange: todayWin?.currentRange || weekWin?.currentRange,
+        sessions: latestMetrics.sessions ?? null,
+        users: latestMetrics.users ?? latestMetrics.totalUsers ?? null,
+        newUsers: latestMetrics.newUsers ?? null,
         engagementRate: latestMetrics.engagementRate !== null ? latestMetrics.engagementRate : null,
-        averageEngagementTime: latestMetrics.averageEngagementTime || 0,
-        bounceRate: latestMetrics.bounceRate || 0,
+        averageEngagementTime: latestMetrics.averageEngagementTime ?? null,
+        bounceRate: latestMetrics.bounceRate ?? null,
         // E-commerce Funnel (null when tracking unconfigured)
         viewItemCount: latestMetrics.viewItemCount,
         addToCartCount: latestMetrics.addToCartCount,
         checkoutCount: latestMetrics.checkoutCount,
         purchaseCount: latestMetrics.purchaseCount,
         revenue: latestMetrics.revenue,
+        currencyCode: latestMetrics.currencyCode,
+        userCountUnit: latestMetrics.userCountUnit,
         // Funnel Rates (%)
         addToCartRate: latestMetrics.addToCartRate,
         checkoutRate: latestMetrics.checkoutRate,
@@ -828,7 +855,8 @@ async function generateDailyIntelligence(userId, options = {}) {
     targetDate,
     generatedAt: now,
     websiteUrl,
-    monitoringStatus: "active",
+    monitoringStatus: coverageIncomplete ? "partial" : "active",
+    coverageIncomplete,
     status: intelligence.status || (findings.length === 0 ? "stable" : "warning"),
     userPreferences,
     storePerformance,
@@ -862,6 +890,7 @@ async function generateDailyIntelligence(userId, options = {}) {
 
   // ── 8. PERSIST REPORT TO MONGODB ──────────────────────────────────────────
   if (!options.dryRun) {
+    await preservePreviousEvidence(db,report);
     const reportsCol = db.collection("intelligence_reports");
     await reportsCol.updateOne(
       { userEmail, targetDate },
@@ -885,7 +914,7 @@ async function generateDailyIntelligence(userId, options = {}) {
           "watchdog.lastRunAt": now,
           "watchdog.lastReportId": String(reportId),
           "watchdog.lastStatus": report.status,
-          "watchdog.lastMonitoringStatus": "active",
+          "watchdog.lastMonitoringStatus": report.monitoringStatus,
           "watchdog.lastFindingsCount": findings.length,
           updatedAt: now,
         },
