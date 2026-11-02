@@ -469,7 +469,7 @@ function watchdogReportHtml({ name, report = {}, dateStr = "", entitlements = nu
  * @param {object} params.report
  * @returns {Promise<object>}
  */
-async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlements = null, idempotencyKey = null }) {
+async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlements = null, idempotencyKey = null, prepareOnly = false, preparedPayload = null, beforeSend = null }) {
   const apiKey = (process.env.RESEND_API_KEY || "").trim();
   const fromEmail = (process.env.EMAIL_FROM || process.env.FROM_EMAIL || "Sharflow <hello@sharflow.online>").trim();
 
@@ -494,6 +494,15 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
 
   const subject = getWatchdogEmailSubject(report);
   const html = watchdogReportHtml({ name: userName, report, entitlements: resolvedEntitlements });
+  const payload = preparedPayload || {
+    from: fromEmail, to: [toEmail], reply_to: "hello@sharflow.online", subject, html,
+  };
+  if (!Array.isArray(payload.to) || payload.to.length !== 1 || payload.to[0] !== toEmail || payload.cc || payload.bcc) {
+    throw new Error("Prepared payload recipient does not match report owner.");
+  }
+  if (prepareOnly) return payload;
+  // Scheduler fencing check after owner lookup/rendering, immediately before I/O.
+  if (beforeSend) await beforeSend();
 
   const res = await fetch(RESEND_URL, {
     method: "POST",
@@ -502,18 +511,17 @@ async function sendWatchdogEmail({ toEmail, userName = "", report = {}, entitlem
       Authorization: `Bearer ${apiKey}`,
       ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
-    body: JSON.stringify({
-      from: fromEmail,
-      to: [toEmail],
-      reply_to: "hello@sharflow.online",
-      subject,
-      html,
-    }),
+    body: JSON.stringify(payload),
+    signal: typeof AbortSignal !== "undefined" ? AbortSignal.timeout(30000) : undefined,
   });
 
   const data = await res.json();
   if (!res.ok) {
-    throw new Error(data?.message || data?.name || "Failed to send email via Resend");
+    const err = new Error(data?.message || data?.name || "Failed to send email via Resend");
+    err.providerCode = data?.name || String(res.status);
+    err.deliveryDisposition = data?.name === "invalid_idempotent_request" ? "payload_conflict" :
+      [400, 401, 403, 404, 422].includes(res.status) ? "permanent_rejection" : "unknown";
+    throw err;
   }
   return data;
 }

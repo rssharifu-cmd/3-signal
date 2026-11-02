@@ -30,6 +30,7 @@ function matches(doc, query) {
         if (op === "$lte") return val !== undefined && val <= arg;
         if (op === "$gte") return val !== undefined && val >= arg;
         if (op === "$gt") return val !== undefined && val > arg;
+        if (op === "$lt") return val !== undefined && val < arg;
         throw new Error("Unsupported mock query operator: " + op);
       });
     }
@@ -45,9 +46,11 @@ function set(doc, values) {
 }
 function mockDb(initial = {}) {
   const data = clone(initial); const calls = [];
-  return { data, calls, collection(name) {
+  return { data, calls, listCollections({name}) { return {toArray:async()=>[{name,options:{}}]}; }, collection(name) {
     const rows = data[name] ||= [];
     return {
+      listIndexes() { return {toArray:async()=>[{name:'_id_',key:{_id:1}}]}; },
+      find(query = {}) { return {toArray:async()=>clone(rows.filter(r=>matches(r,query)))}; },
       async countDocuments(query) { return rows.filter((r) => matches(r, query)).length; },
       async findOne(query, options = {}) {
         calls.push({ name, op: "findOne", query });

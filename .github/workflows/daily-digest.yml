@@ -2,9 +2,16 @@ name: Sharflow Watchdog Scheduler
 
 on:
   schedule:
-    # Runs daily at 13:00 UTC (morning US / afternoon EU)
-    - cron: '0 13 * * *'
+    # Hourly recovery; a new daily target opens at 13:00 UTC.
+    - cron: '0 * * * *'
   workflow_dispatch: # Allows manually triggering the run from GitHub Actions UI
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sharflow-daily-delivery-production
+  cancel-in-progress: false
 
 jobs:
   run-watchdog:
@@ -12,6 +19,7 @@ jobs:
     # Only the approved production branch may consume production service secrets.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -24,11 +32,12 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Execute Watchdog Scheduler
         env:
           APP_ENV: production
+          DAILY_DELIVERY_EXECUTION_ACK: ${{ vars.DAILY_DELIVERY_EXECUTION_ACK }}
           EMAIL_DELIVERY_MODE: resend
           PLANS_ENFORCED: ${{ secrets.PLANS_ENFORCED }}
           MONGODB_URI: ${{ secrets.MONGODB_URI }}
