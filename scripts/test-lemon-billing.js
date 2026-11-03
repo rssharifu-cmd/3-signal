@@ -18,8 +18,21 @@ function webhook(data = subscription(), custom, event = 'subscription_created') 
 }
 function fixture(initial = {}, fetchFn) {
   const db = mockDb({ users: [user()], ...initial });
-  const load = loader({ db, fetchFn: fetchFn || (async () => response({ data: subscription() })) });
+  const load = loader({ db, fetchFn: async (...args) => catalogResponse(args[0]) ||
+    (fetchFn ? fetchFn(...args) : response({ data: subscription() })) });
   return { db, load, billing: load('api/billing.js'), webhook: load('api/lemon-webhook.js') };
+}
+function catalogResponse(url, price = 999) {
+  if (url.includes('/products?')) return response({ data: ['Analytics', 'Complete'].map((name, index) => ({
+    type: 'products', id: String(index + 11), attributes: { name: 'Sharflow ' + name, store_id: 10, test_mode: true, status: 'published' },
+  })) });
+  if (url.includes('/variants?')) {
+    const analytics = url.includes('=11&');
+    return response({ data: [{ type: 'variants', id: analytics ? '20' : '30', attributes: {
+      product_id: analytics ? 11 : 12, status: 'published', is_subscription: true, interval: 'month',
+      interval_count: 1, price: analytics ? price : 1975, pay_what_you_want: false,
+    } }] });
+  }
 }
 function linked(extra = {}) { return user({ billingProvider: 'lemon', plan: 'analytics', lemonSubscriptionId: '40',
   lemonCustomerId: '50', lemonTestMode: true, lemonStatus: 'active', lemonRenewsAt: future(), ...extra }); }
@@ -126,4 +139,24 @@ test('full latest invoice refund revokes access; ordinary updates cannot restore
 test('provider URLs cannot redirect customers to unrelated sites', () => {
   const { safeUrl } = fixture().load('api/_lib/lemon.js');
   for (const url of ['https://lemonsqueezy.com.evil.example', 'javascript:alert(1)', 'http://sharflow.lemonsqueezy.com', 'https://name:secret@sharflow.lemonsqueezy.com']) assert.throws(() => safeUrl(url));
+});
+test('public catalog returns only verified published plan metadata, never credentials or accounts', async () => {
+  const f = fixture();
+  const result = await call(f.billing, { method: 'GET', url: '/api/billing?action=plans', email: null });
+  assert.equal(result.statusCode, 200);
+  assert.equal(result.body.plans.analytics.variantId, '20');
+  assert.equal(result.body.plans.complete.priceUsdMonthly, 19.75);
+  assert.doesNotMatch(JSON.stringify(result.body), /fixture-only|fixture-signing|owner@example/);
+  assert.equal(f.db.calls.length, 0);
+});
+test('catalog coalesces concurrent provider reads', async () => {
+  let count = 0;
+  const load = loader({ fetchFn: async url => { count++; return catalogResponse(url); } });
+  const { catalog } = load('api/_lib/lemon.js');
+  await Promise.all([catalog(), catalog(), catalog()]);
+  assert.equal(count, 3);
+});
+test('catalog refuses an incorrect subscription price', async () => {
+  const load = loader({ fetchFn: async url => catalogResponse(url, 1) });
+  await assert.rejects(load('api/_lib/lemon.js').catalog(), /price verification failed/);
 });
