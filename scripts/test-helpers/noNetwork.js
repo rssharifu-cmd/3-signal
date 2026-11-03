@@ -1,4 +1,5 @@
 // Preload for isolated suites. Never load .env or inherit live service credentials.
+delete process.env.DAILY_DELIVERY_EXECUTION_ACK;
 for (const key of Object.keys(process.env)) {
   if (/APP_ENV|APP_ORIGIN|EMAIL_DELIVERY_MODE|TRUST_VERCEL_IP|MONGODB|RESEND|GEMINI|TAVILY|GOOGLE_CLIENT|BING_CLIENT|PADDLE|JWT_SECRET|OAUTH_TOKEN|EMAIL_FROM|FROM_EMAIL|ADMIN_EMAILS|PLANS_ENFORCED|ALLOW_PROD_TEST/.test(key)) delete process.env[key];
 }

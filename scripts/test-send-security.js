@@ -122,21 +122,16 @@ test("S2 actual frontend report caller authenticates and sends stored report ide
   assert.equal(sent.headers.Authorization, "Bearer mock-session"); assert.deepEqual(JSON.parse(sent.body), { action: "watchdog_report", reportId });
 });
 test("S2 actual scheduler processUser sends owned report through direct helper", async () => {
-  const x = setup(), source = fs.readFileSync(path.join(ROOT, "scripts/run-watchdog-scheduler.js"), "utf8");
-  const start = source.indexOf("async function processUser("), end = source.indexOf("async function run()", start);
-  const context = vm.createContext({
-    console: { log() {}, warn() {}, error() {} }, Date, process: { env: { RESEND_API_KEY: "isolated" } },
-    verified: u => Boolean(u.emailVerifiedAt && u.authVersion && u.active !== false),
-    ensureTrial: async () => {}, getEntitlements: () => ({ enforced: true, canRunMonitoring: true }),
-    generateDailyIntelligence: async () => ({ reportId, userEmail: "owner@example.com", findings: [] }),
-    sendWatchdogEmail: x.handler.sendWatchdogEmail,
-  });
-  vm.runInContext(source.slice(start, end), context);
+  const x = setup();
+  const context = loader({db:x.db,overrides:{
+    '../api/_lib/generateDailyIntelligence':{generateDailyIntelligence:async (_id,{targetDate})=>({reportId,targetDate,userEmail:'owner@example.com',findings:[]})},
+    '../api/send':{sendWatchdogEmail:x.handler.sendWatchdogEmail},
+  }})('scripts/run-watchdog-scheduler.js');
   for (const denied of [user({emailVerifiedAt:undefined}),user({configurationReviewRequired:true})]) {
     const skipped = await context.processUser(denied,x.db,"2026-10-28"); assert.equal(skipped.reason,"ownership_or_review_required");
   }
   assert.equal(x.sent.length,0);
   const result = await context.processUser(user(), x.db, "2026-10-28");
-  assert.equal(result.status, "success"); assert.equal(result.emailSent, true); assert.equal(x.sent.length, 1);
+  assert.equal(result.status, "accepted"); assert.equal(result.emailSent, true); assert.equal(x.sent.length, 1);
   assert.deepEqual(x.sent[0].payload.to, ["owner@example.com"]);
 });

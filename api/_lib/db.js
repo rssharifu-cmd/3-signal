@@ -43,4 +43,11 @@ async function getDb() {
   }
 }
 
-module.exports = { getDb };
+// Used only by the standalone worker on shutdown, never by request handlers.
+async function closeDb() {
+  const pending = clientPromise;
+  clientPromise = null;
+  delete global._mongoClientPromise;
+  if (pending) await (await pending).close();
+}
+module.exports = { getDb, closeDb };

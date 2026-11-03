@@ -402,51 +402,12 @@ async function checkCronSummary() {
   const start = Date.now();
   try {
     const db = await withTimeout(getDb(), TIMEOUT_MS, "MongoDB");
-    const last24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-    const [sentCount, lockedCount, latestDigest, recentLogs] = await Promise.all([
-      db.collection("digests").countDocuments({ sentAt: { $gte: last24h } }),
-      db.collection("digests").countDocuments({ locked: true, lockedAt: { $gte: last24h } }),
-      db.collection("digests").findOne({ sentAt: { $exists: true } }, { sort: { sentAt: -1 } }),
-      db.collection("delivery_logs").find({ timestamp: { $gte: last24h } }).sort({ timestamp: -1 }).limit(10).toArray().catch(() => []),
-    ]);
-
-    const failedLogsCount = recentLogs.filter((l) => l.status === "failed").length;
-    const skippedLogsCount = recentLogs.filter((l) => l.status === "skipped").length;
-
-    let status = "ok";
-    if (lockedCount > 0 && sentCount === 0) {
-      status = "unknown";
-    }
-
-    const responseTimeMs = Date.now() - start;
-    const lastSentFormatted = latestDigest?.sentAt ? new Date(latestDigest.sentAt).toISOString() : "None";
-
-    return {
-      service: "Cron Activity (Last 24h)",
-      status,
-      responseTimeMs,
-      message: `${sentCount} digest(s) successfully delivered in last 24h. Last sent: ${lastSentFormatted}.`,
-      extra: {
-        sentLast24h: sentCount,
-        lockedOrInProgress: lockedCount,
-        recentFailedDeliveries: failedLogsCount,
-        recentSkippedDeliveries: skippedLogsCount,
-        latestSentAt: latestDigest?.sentAt || null,
-        note: "Derived from MongoDB digests and delivery_logs collections (best available persisted cron telemetry).",
-      },
-    };
-  } catch (err) {
-    return {
-      service: "Cron Activity (Last 24h)",
-      status: "error",
-      responseTimeMs: Date.now() - start,
-      message: `Could not retrieve cron activity summary: ${err.message}`,
-    };
+    const {deliveryDiagnostics} = require("./_lib/deliveryDiagnostics");
+    return {...await withTimeout(deliveryDiagnostics(db), TIMEOUT_MS, "Daily Delivery"), responseTimeMs:Date.now()-start};
+  } catch {
+    return {service:"Daily Delivery",status:"error",responseTimeMs:Date.now()-start,message:"Daily delivery diagnostics unavailable; inspect collection provisioning and access."};
   }
 }
-
-// ── MAIN HANDLER ──────────────────────────────────────────────────────────────
 
 async function handler(req, res) {
   if (cors(req, res)) return;

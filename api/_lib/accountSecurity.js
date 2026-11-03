@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { getDb } = require("./db");
 const { getEntitlements } = require("./plans");
-function verified(user) { return Boolean(user?.emailVerifiedAt && user?.authVersion && user.active !== false); }
+const {verified} = require('./accountEligibility');
 function claims(req) {
   const header = req.headers?.authorization;
   if (typeof header !== "string" || !header.startsWith("Bearer ")) return null;

@@ -199,41 +199,8 @@ async function fetchPaddleConfig() {
 }
 
 async function initPaddle() {
-  if (paddleInitialized) return true;
-  await fetchPaddleConfig();
-
-  // Wait briefly if async Paddle script is loading
-  let attempts = 0;
-  while (!window.Paddle && attempts < 25) {
-    await new Promise((r) => setTimeout(r, 120));
-    attempts++;
-  }
-
-  if (!window.Paddle) {
-    console.warn("Paddle.js library is not available.");
-    return false;
-  }
-
-  try {
-    if (cachedPaddleConfig.env === "sandbox" && window.Paddle.Environment?.set) {
-      window.Paddle.Environment.set("sandbox");
-    }
-
-    if (cachedPaddleConfig.clientToken && window.Paddle.Initialize) {
-      const currentEmail = localStorage.getItem(STORAGE.email) || "";
-      window.Paddle.Initialize({
-        token: cachedPaddleConfig.clientToken,
-        pwCustomer: currentEmail ? { email: currentEmail } : undefined,
-        eventCallback: handlePaddleEvent,
-      });
-      paddleInitialized = true;
-      return true;
-    }
-    return false;
-  } catch (err) {
-    console.warn("Paddle initialization notice:", err.message);
-    return false;
-  }
+  // Paddle is not approved for Sharflow payments.
+  return false;
 }
 
 async function refreshUserPlanFromServer(retries = 4, delayMs = 2000) {
@@ -276,67 +243,9 @@ function handlePaddleEvent(data) {
   }
 }
 
-async function openPaddleCheckout(priceIdOverride) {
-  const priceId = priceIdOverride || cachedPaddleConfig.defaultPriceId || SHARFLOW_PRO_PRICE_ID;
-  const userEmail = localStorage.getItem(STORAGE.email) || "";
-
-  const initialized = await initPaddle();
-
-  if (!initialized || !cachedPaddleConfig.clientToken) {
-    console.info("[Paddle Checkout] Client token not configured yet. Checkout remains safely disabled during early access preview.");
-    toast("Sharflow Pro online checkout is currently in early-access mode. Contact hello@sharflow.online for early access.");
-    return;
-  }
-
-  let checkoutToken = null;
-  const token = localStorage.getItem(STORAGE.token);
-  if (token) {
-    try {
-      const res = await fetch("/api/user?action=checkout_token", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const d = await res.json();
-        if (d.ok && d.checkoutToken) {
-          checkoutToken = d.checkoutToken;
-        }
-      }
-    } catch (tokenErr) {
-      console.warn("[Paddle Checkout] Could not retrieve checkout link token:", tokenErr.message);
-    }
-  }
-
-  try {
-    if (window.Paddle && window.Paddle.Checkout && typeof window.Paddle.Checkout.open === "function") {
-      window.Paddle.Checkout.open({
-        settings: {
-          displayMode: "overlay",
-          theme: "light",
-          locale: "en",
-          successUrl: `${window.location.origin}/?checkout=success`,
-        },
-        items: [
-          {
-            priceId: priceId,
-            quantity: 1,
-          },
-        ],
-        customer: userEmail ? { email: userEmail } : undefined,
-        customData: {
-          checkoutToken: checkoutToken || undefined,
-          email: userEmail || undefined,
-          plan: "pro",
-          source: "sharflow_web",
-          priceId: priceId,
-        },
-      });
-    } else {
-      toast("Paddle checkout library is not available. Please try again later.");
-    }
-  } catch (err) {
-    console.error("Failed to open Paddle Checkout:", err);
-    toast("Paddle Checkout: " + (err.message || "Could not open checkout modal."));
-  }
+async function openPaddleCheckout() {
+  toast("Paid checkout is unavailable during pre-launch. Contact hello@sharflow.online for account assistance.");
+  return false;
 }
 
 function getUserEntitlements() {
@@ -400,7 +309,7 @@ function updateOverviewTrialBanner(entitlementsInput) {
 function startCheckout(planKey) {
   const normKey = planKey === "complete" ? "complete" : "analytics";
   // Friendly notice as fallback if price ID is not configured
-  toast("Billing opens shortly. We'll email you before your trial ends.");
+  toast("Paid checkout is unavailable during pre-launch. Final prices will be confirmed before paid launch.");
 }
 
 function checkoutSharflowPro() {
@@ -533,7 +442,7 @@ function updateBillingPanelUI() {
   if (actionContainer) {
     actionContainer.innerHTML = `
       <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:12px;text-align:center;color:#DC2626;font-size:13px;line-height:1.5;">
-        Select either Analytics ($9/mo) or Complete ($19/mo) below to reactivate daily monitoring.
+        Paid checkout is unavailable. Contact support about monitoring access.
       </div>
     `;
   }
@@ -1937,18 +1846,19 @@ function renderWatchdogReportHtml(report) {
   const status = (intel.status || report.status || report.monitoringStatus || "normal").toLowerCase();
   const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
   const isNoSources = status === "no_sources" || monitoringStatus === "no_sources";
-  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
-  const headline = intel.headline || "Website Watchdog Scan Complete";
-  const summary = intel.summary || "";
-  const findings = Array.isArray(intel.priorityRankedFindings) ? intel.priorityRankedFindings : [];
+  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data" || report.coverageIncomplete === true || monitoringStatus === "partial";
+  const described = new Map((intel.priorityRankedFindings || []).map(f => [f.id, f]));
+  const findings = Array.isArray(report.findings) ? report.findings.map(f => ({...described.get(f.id), ...f})) : (intel.priorityRankedFindings || []);
   const actions = Array.isArray(intel.recommendedActions) ? intel.recommendedActions : [];
+  const headline = findings.length ? (intel.headline || "Verified changes detected") : isInsufficientData ? "Monitoring evidence incomplete" : isNoSources ? "Monitoring not active" : "No significant changes in evaluated periods";
+  const summary = findings.length ? (intel.summary || "") : "Only complete evaluated periods support conclusions. Overall business and technical health are not confirmed.";
 
   let statusBadgeClass = "green";
-  let statusLabel = "All systems normal";
+  let statusLabel = "No significant changes in evaluated periods";
   if (isNoSources) {
     statusBadgeClass = "amber";
     statusLabel = "Monitoring Not Active";
-  } else if (isInsufficientData) {
+  } else if (isInsufficientData && !findings.length) {
     statusBadgeClass = "amber";
     statusLabel = "Insufficient Data · Baseline Pending";
   } else if (status === "critical" || status === "critical_attention") {
@@ -1975,6 +1885,7 @@ function renderWatchdogReportHtml(report) {
           </button>
         </div>
         <h2 style="font-size:1.2rem;font-weight:700;color:var(--text);line-height:1.35;margin-bottom:8px;">${escapeHtml(headline)}</h2>
+        ${isInsufficientData ? "<p>Monitoring evidence incomplete. Overall business stability cannot be confirmed.</p>" : ""}
         ${summary ? `<p style="font-size:14px;color:var(--muted);line-height:1.6;margin:0;">${escapeHtml(summary)}</p>` : ""}
       </div>
   `;
@@ -1983,58 +1894,32 @@ function renderWatchdogReportHtml(report) {
   const sp = report.storePerformance || null;
   if (sp) {
     const isEcom = sp.configured === true;
-    const visitorsVal = `${(sp.sessions || 0).toLocaleString()} sessions`;
-    const visitorsSub = sp.users ? `${(sp.users || 0).toLocaleString()} visitors` : "";
-    const engageVal = sp.engagementRate !== null && sp.engagementRate !== undefined
+    const visitorsVal = Number.isFinite(sp.sessions) ? `${sp.sessions.toLocaleString()} sessions` : "Unknown sessions";
+    const visitorsSub = Number.isFinite(sp.users) ? `${sp.users.toLocaleString()} ${sp.userCountUnit === "user_days" ? "user-days" : "visitors"}` : "";
+    const engageVal = Number.isFinite(sp.engagementRate)
       ? `${(sp.engagementRate * 100).toFixed(1)}%`
-      : (sp.averageEngagementTime ? `${sp.averageEngagementTime}s avg` : "—");
-    const cartVal = isEcom && sp.addToCartCount !== null ? (sp.addToCartCount || 0).toLocaleString() : "Not configured";
-    const checkoutVal = isEcom && sp.checkoutCount !== null ? (sp.checkoutCount || 0).toLocaleString() : "Not configured";
-    const purchasesVal = isEcom && sp.purchaseCount !== null ? (sp.purchaseCount || 0).toLocaleString() : "Not configured";
-    const revenueVal = isEcom && sp.revenue !== null ? `$${sp.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Not configured";
+      : (Number.isFinite(sp.averageEngagementTime) ? `${sp.averageEngagementTime}s avg` : "—");
+    const cartVal = isEcom && Number.isFinite(sp.addToCartCount) ? (sp.addToCartCount || 0).toLocaleString() : "Unknown";
+    const checkoutVal = isEcom && Number.isFinite(sp.checkoutCount) ? (sp.checkoutCount || 0).toLocaleString() : "Unknown";
+    const purchasesVal = isEcom && Number.isFinite(sp.purchaseCount) ? (sp.purchaseCount || 0).toLocaleString() : "Unknown";
+    const revenueVal = isEcom && Number.isFinite(sp.revenue) && /^[A-Z]{3}$/.test(sp.currencyCode || "") ? `${sp.currencyCode} ${sp.revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "Unknown";
 
     let dropOffContent = "";
-    if (isEcom && sp.checkoutCount > 0 && sp.purchaseCount !== null) {
-      const c2pRate = sp.checkoutToPurchaseRate !== null ? sp.checkoutToPurchaseRate : ((sp.purchaseCount / sp.checkoutCount) * 100);
-      const abandonRate = Math.max(0, 100 - c2pRate).toFixed(1);
-      if (sp.addToCartCount > 0 && sp.checkoutCount < sp.addToCartCount) {
-        const cartToCheckout = ((sp.checkoutCount / sp.addToCartCount) * 100).toFixed(1);
-        dropOffContent = `
-          <div style="font-size:13px;color:var(--text);line-height:1.5;">
-            <strong>Checkout Drop-Off:</strong> ${abandonRate}% of shoppers who began checkout did not complete their order (${sp.checkoutCount} checkouts vs ${sp.purchaseCount} orders).<br/>
-            <span style="color:var(--muted);">Cart-to-checkout progression: ${cartToCheckout}% of cart additions proceeded to checkout.</span>
-          </div>
-        `;
-      } else {
-        dropOffContent = `
-          <div style="font-size:13px;color:var(--text);line-height:1.5;">
-            <strong>Checkout Conversion:</strong> ${c2pRate.toFixed(1)}% of shoppers who started checkout completed their purchase (${abandonRate}% checkout drop-off).
-          </div>
-        `;
-      }
-    } else if (isEcom) {
-      dropOffContent = `
-        <div style="font-size:13px;color:var(--muted);line-height:1.5;">
-          Shopper funnel progression steady with ${(sp.sessions || 0).toLocaleString()} visits recorded yesterday.
-        </div>
-      `;
+    if (isEcom && Number.isFinite(sp.checkoutToPurchaseRate) && sp.checkoutToPurchaseRate >= 0 && sp.checkoutToPurchaseRate <= 100) {
+      dropOffContent = `<div>Checkout conversion: ${sp.checkoutToPurchaseRate.toFixed(1)}% (reported event rate).</div>`;
     } else {
-      dropOffContent = `
-        <div style="font-size:13px;color:var(--muted);line-height:1.5;">
-          E-commerce funnel events (<code style="font-size:12px;">add_to_cart</code>, <code style="font-size:12px;">begin_checkout</code>, <code style="font-size:12px;">purchase</code>) are not yet configured in your GA4 property. Once enabled, drop-off analysis will populate automatically.
-        </div>
-      `;
+      dropOffContent = "<div>Funnel conversion unavailable: compatible evidence is required.</div>";
     }
 
     const topChannels = Array.isArray(sp.topChannels) ? sp.topChannels : [];
     const aiReferrals = Array.isArray(sp.aiReferrals) ? sp.aiReferrals : [];
-    const totalSess = sp.sessions || 1;
+    const totalSess = Number.isFinite(sp.sessions) && sp.sessions > 0 ? sp.sessions : null;
 
     let sourcesContent = "";
     if (topChannels.length > 0) {
       const channelPills = topChannels.map((c) => {
-        const pct = Math.round((c.sessions / totalSess) * 100);
-        return `<span style="display:inline-block;padding:3px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);margin-right:6px;margin-bottom:4px;"><strong>${escapeHtml(c.channel)}:</strong> ${c.sessions} (${pct}%)</span>`;
+        const pct = totalSess !== null && Number.isFinite(c.sessions) ? Math.round((c.sessions / totalSess) * 100) : null;
+        return `<span style="display:inline-block;padding:3px 8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);margin-right:6px;margin-bottom:4px;"><strong>${escapeHtml(c.channel)}:</strong> ${Number.isFinite(c.sessions) ? c.sessions : "Unknown"}${pct !== null ? ` (${pct}%)` : ""}</span>`;
       }).join("");
 
       let aiPills = "";
@@ -2048,7 +1933,7 @@ function renderWatchdogReportHtml(report) {
         ${aiPills}
       `;
     } else {
-      sourcesContent = `<div style="font-size:12px;color:var(--muted);">No traffic sources recorded yesterday.</div>`;
+      sourcesContent = `<div style="font-size:12px;color:var(--muted);">Traffic source evidence unavailable.</div>`;
     }
 
     html += `
@@ -2067,18 +1952,18 @@ function renderWatchdogReportHtml(report) {
           </div>
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
             <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Add to Cart</div>
-            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.addToCartCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(cartVal)}</div>
-            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.addToCartRate !== null ? `${sp.addToCartRate}% of visits` : "Cart events"}</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && Number.isFinite(sp.addToCartCount) ? "var(--text)" : "var(--dim)"};">${escapeHtml(cartVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && Number.isFinite(sp.addToCartRate) ? `${sp.addToCartRate}% of visits` : "Cart events"}</div>
           </div>
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
             <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Checkouts</div>
-            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.checkoutCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(checkoutVal)}</div>
-            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.checkoutRate !== null ? `${sp.checkoutRate}% of visits` : "Checkouts started"}</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && Number.isFinite(sp.checkoutCount) ? "var(--text)" : "var(--dim)"};">${escapeHtml(checkoutVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && Number.isFinite(sp.checkoutRate) ? `${sp.checkoutRate}% of visits` : "Checkouts started"}</div>
           </div>
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
             <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Purchases</div>
-            <div style="font-size:15px;font-weight:700;color:${isEcom && sp.purchaseCount !== null ? "var(--text)" : "var(--dim)"};">${escapeHtml(purchasesVal)}</div>
-            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && sp.purchaseConversionRate !== null ? `${sp.purchaseConversionRate}% conv. rate` : "Completed orders"}</div>
+            <div style="font-size:15px;font-weight:700;color:${isEcom && Number.isFinite(sp.purchaseCount) ? "var(--text)" : "var(--dim)"};">${escapeHtml(purchasesVal)}</div>
+            <div style="font-size:11px;color:var(--dim);margin-top:2px;">${isEcom && Number.isFinite(sp.purchaseConversionRate) ? `${sp.purchaseConversionRate}% conv. rate` : "Completed orders"}</div>
           </div>
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
             <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Revenue</div>
@@ -2199,7 +2084,7 @@ function renderWatchdogReportHtml(report) {
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
           <strong style="color:var(--amber-text);font-size:14px;">Insufficient monitoring baseline</strong>
         </div>
-        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">Not enough usable comparison data is available yet. Watchdog requires at least 2 consecutive daily snapshots to evaluate trend baselines and confirm normal website health.</p>
+        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">Not enough usable comparison data is available yet. Watchdog requires complete, fresh comparison periods. Technical health cannot be confirmed from these metrics.</p>
       </div>
     `;
   } else {
@@ -2210,7 +2095,7 @@ function renderWatchdogReportHtml(report) {
           <span style="color:var(--green);font-size:16px;">✓</span>
           <strong style="color:var(--green);font-size:14px;">No critical anomalies detected</strong>
         </div>
-        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">All traffic sources, query positions, and conversion milestones are tracking within baseline noise boundaries.</p>
+        <p style="margin:0;font-size:13px;color:var(--text);line-height:1.5;">No deterministic anomaly cleared its threshold in evaluated periods. This does not establish overall business or technical health.</p>
       </div>
     `;
   }
@@ -2255,7 +2140,7 @@ function renderWatchdogReport(report) {
     const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
     if (status === "no_sources" || monitoringStatus === "no_sources") {
       note.textContent = `Monitoring inactive · Connect data sources · ${report.targetDate || "Today"}`;
-    } else if (status === "insufficient_data" || monitoringStatus === "insufficient_data") {
+    } else if (status === "insufficient_data" || monitoringStatus === "insufficient_data" || report.coverageIncomplete === true || monitoringStatus === "partial") {
       note.textContent = `Awaiting comparison baselines · Sync in progress · ${report.targetDate || "Today"}`;
     } else if (aiSkipped) {
       note.textContent = `Scanned active sources · Zero anomalies detected · ${report.targetDate || "Today"}`;
@@ -2453,7 +2338,7 @@ function exportReportCSV() {
   const status = (intel.status || report.status || report.monitoringStatus || "normal").toLowerCase();
   const monitoringStatus = (report.monitoringStatus || "").toLowerCase();
   const isNoSources = status === "no_sources" || monitoringStatus === "no_sources";
-  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data";
+  const isInsufficientData = status === "insufficient_data" || monitoringStatus === "insufficient_data" || report.coverageIncomplete === true || monitoringStatus === "partial";
 
   const form = typeof getSavedForm === "function" ? getSavedForm() : {};
   const websiteDomain = report.websiteUrl || form.websiteUrl || "your-website.com";
@@ -2557,8 +2442,8 @@ function exportReportCSV() {
     let statusSeverity = "NORMAL";
     let statusTitle = intel.headline || "Website Watchdog Scan Complete";
     let statusCategory = "Health Check";
-    let statusEvidence = intel.summary || "All metrics tracking within baseline bounds. No significant ranking or traffic anomalies detected.";
-    let statusCause = "None - systems operating normally";
+    let statusEvidence = intel.summary || "No significant changes established in evaluated periods; unknown metrics and technical health are not confirmed.";
+    let statusCause = "No significant change established in evaluated evidence";
     let statusImpact = "No negative business impact detected";
     let statusActions = overallActions.map((a) => typeof a === "string" ? a : a.action).join(" | ") || "Continue automated monitoring";
 
@@ -2576,7 +2461,7 @@ function exportReportCSV() {
       statusSeverity = "PENDING";
       statusTitle = "Insufficient monitoring baseline";
       statusCategory = "Baseline Accumulation";
-      statusEvidence = "Requires at least 2 consecutive daily snapshots to evaluate trend baselines and confirm normal website health.";
+      statusEvidence = "Requires complete, fresh comparison periods. Technical health cannot be confirmed from these metrics.";
       statusCause = "Initial snapshot baseline in progress";
       statusImpact = "Historical comparison baselines pending";
       statusActions = "Awaiting subsequent daily scan snapshots";
