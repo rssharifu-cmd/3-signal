@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "Sharflow — AI Website Watchdog",
   "engines": {
-    "node": ">=18"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "node server.js",

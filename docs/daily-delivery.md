@@ -82,10 +82,18 @@ Do not enable production until an operator reconciliation procedure is accepted.
 `npm test` runs with service credentials scrubbed and all network access blocked.
 The delivery regression suite uses synthetic users, in-memory atomic database
 operations and a simulated idempotent provider. No live database, scheduler or
-email execution is part of these tests. Actual MongoDB contention/index behavior,
-provider replay behavior and Vercel/GitHub environment isolation still need
-isolated integration verification before release. Node runtime parity also needs
-verification (local Node 24, authored workflow Node 20).
+email execution is part of these tests. Separate isolated MongoDB 8.0.16
+verification on Node 24 passed 13 database checks and 7 mock-provider checks,
+including 40 concurrent workers and lease/crash recovery. Real provider replay
+behavior and deployed Vercel/GitHub environment isolation remain release checks.
+
+The application targets Node 24: `package.json` specifies `24.x` (also used by
+Vercel for new deployments), the daily scheduler selects Node 24, and `.nvmrc`
+selects the same major locally. Use the latest available patched Node 24 release.
+Vercel manages minor/patch versions, so exact build/function patch parity is not
+assumed. Verify the actual deployed runtime after an approved release. The
+independent backup/restore tools retain their supported Node 22 configuration;
+their production workflows are not changed by this application runtime patch.
 
 Daily claims cover the daily scheduler. Explicit on-demand audits and user-requested
 manual email sends retain their existing behavior and are not a cross-entry-point
