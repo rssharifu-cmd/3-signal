@@ -160,3 +160,12 @@ test('catalog refuses an incorrect subscription price', async () => {
   const load = loader({ fetchFn: async url => catalogResponse(url, 1) });
   await assert.rejects(load('api/_lib/lemon.js').catalog(), /price verification failed/);
 });
+test('a published product can use its single pending default variant', async () => {
+  const load = loader({ fetchFn: async url => {
+    const r = catalogResponse(url);
+    const data = await r.json();
+    if (url.includes('/variants?')) data.data[0].attributes.status = 'pending';
+    return response(data);
+  } });
+  assert.equal((await load('api/_lib/lemon.js').catalog()).plans.analytics.variantId, '20');
+});

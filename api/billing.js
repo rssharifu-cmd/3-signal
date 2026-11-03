@@ -14,7 +14,8 @@ module.exports = async function billing(req, res) {
   // customer records or subscription data here. Provider reads are coalesced and cached.
   if (req.method === 'GET' && new URL(req.url, 'https://sharflow.online').searchParams.get('action') === 'plans') {
     try { return res.status(200).json({ ok: true, ...(await lemon.catalog()) }); }
-    catch { return res.status(503).json({ error: 'Plan verification is temporarily unavailable' }); }
+    catch (err) { return res.status(503).json({ error: 'Plan verification is temporarily unavailable',
+      code: /^(LEMON|CATALOG)_[A-Z0-9_]+$/.test(err.code || '') ? err.code : 'CATALOG_UNAVAILABLE' }); }
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireAccount(req, res);
