@@ -10,6 +10,12 @@ module.exports = async function billing(req, res) {
   if (cors(req, res)) return;
   res.setHeader('Cache-Control', 'no-store');
   if (req.method === 'OPTIONS') return res.status(204).end();
+  // Published product identifiers/prices are public checkout metadata. Never expose credentials,
+  // customer records or subscription data here. Provider reads are coalesced and cached.
+  if (req.method === 'GET' && new URL(req.url, 'https://sharflow.online').searchParams.get('action') === 'plans') {
+    try { return res.status(200).json({ ok: true, ...(await lemon.catalog()) }); }
+    catch { return res.status(503).json({ error: 'Plan verification is temporarily unavailable' }); }
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const user = await requireAccount(req, res);
   if (!user) return;
@@ -32,6 +38,8 @@ module.exports = async function billing(req, res) {
       }
     } else if (body.action === 'portal') return res.status(404).json({ error: 'No subscription to manage' });
     if (!Object.hasOwn(c.variants, body.plan)) return res.status(400).json({ error: 'Choose Analytics or Complete' });
+    const catalog = await lemon.catalog();
+    if (catalog.plans[body.plan].variantId !== c.variants[body.plan]) throw new Error('Configured variant does not match verified monthly price');
     if (user.lemonCheckout?.url && user.lemonCheckout.plan === body.plan &&
         new Date(user.lemonCheckout.expiresAt) > new Date()) {
       return res.status(200).json({ ok: true, url: lemon.safeUrl(user.lemonCheckout.url) });
