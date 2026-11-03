@@ -36,7 +36,7 @@ async function request(endpoint, { method = 'GET', body } = {}) {
       Accept: 'application/vnd.api+json', 'Content-Type': 'application/vnd.api+json' },
     ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error('Billing provider temporarily unavailable');
+  if (!response.ok) throw Object.assign(new Error('Billing provider temporarily unavailable'), { code: 'LEMON_HTTP_' + response.status });
   return response.json();
 }
 function planFor(a, c = settings()) {
@@ -50,7 +50,7 @@ function access(a, now = new Date()) {
 let catalogCache;
 async function catalog() {
   const c = settings();
-  if (!c.apiKey || !/^\d+$/.test(c.storeId)) throw new Error('Billing connection is not configured');
+  if (!c.apiKey || !/^\d+$/.test(c.storeId)) throw Object.assign(new Error('Billing connection is not configured'), { code: 'CATALOG_NOT_CONFIGURED' });
   const key = hash(c.apiKey) + ':' + c.storeId + ':' + c.testMode;
   if (catalogCache?.key === key && catalogCache.until > Date.now()) return catalogCache.promise;
   const promise = (async () => {
@@ -59,13 +59,14 @@ async function catalog() {
     for (const [plan, name, amount] of [['analytics', 'Sharflow Analytics', 999], ['complete', 'Sharflow Complete', 1975]]) {
       const products = (result.data || []).filter(p => p.type === 'products' && p.attributes?.name === name &&
         String(p.attributes.store_id) === c.storeId && p.attributes.test_mode === c.testMode && p.attributes.status === 'published');
-      if (products.length !== 1) throw new Error('Expected one published ' + name + ' product');
+      if (products.length !== 1) throw Object.assign(new Error('Expected one published ' + name + ' product'), { code: 'CATALOG_PRODUCT_' + plan.toUpperCase() });
       const variants = await request('/variants?filter%5Bproduct_id%5D=' + encodeURIComponent(products[0].id) + '&page%5Bsize%5D=100');
-      const matches = (variants.data || []).filter(v => v.type === 'variants' && v.attributes?.status === 'published' &&
+      const matches = (variants.data || []).filter(v => v.type === 'variants' &&
+        (v.attributes?.status === 'published' || (v.attributes?.status === 'pending' && variants.data.length === 1)) &&
         String(v.attributes.product_id) === String(products[0].id) && v.attributes.is_subscription === true &&
         v.attributes.interval === 'month' && v.attributes.interval_count === 1 && v.attributes.price === amount &&
         v.attributes.pay_what_you_want === false);
-      if (matches.length !== 1) throw new Error('Monthly price verification failed for ' + name);
+      if (matches.length !== 1) throw Object.assign(new Error('Monthly price verification failed for ' + name), { code: 'CATALOG_VARIANT_' + plan.toUpperCase() });
       plans[plan] = { name, priceUsdMonthly: amount / 100, variantId: String(matches[0].id) };
     }
     return { storeId: c.storeId, testMode: c.testMode, plans };
