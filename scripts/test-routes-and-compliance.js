@@ -64,7 +64,7 @@ test("refund.html does not contain unapproved 14-day guarantee promises", () => 
   );
   assert.ok(content.includes("Paid checkout and recurring billing are not available"), "Must disclose inactive billing");
   assert.ok(content.includes("Lemon Squeezy account approval is complete"), "Must describe account approval accurately");
-  assert.ok(content.includes("products, prices and checkout integration are not configured"), "Must disclose unconfigured integration");
+  assert.ok(content.includes("payment activation is pending"), "Must disclose unconfigured integration");
   assert.ok(content.includes("Paddle is not approved for use"), "Must not present Paddle as approved");
   assert.ok(content.includes("non-waivable statutory rights"), "Must preserve statutory consumer rights");
   assert.ok(!content.includes("Paddle.com Market Ltd"), "Must not identify unapproved Paddle as active merchant");
@@ -97,11 +97,11 @@ test("Pre-launch payment disclosures agree across public payment surfaces", () =
   for (const file of ["index.html", "pricing.html", "terms.html", "refund.html"]) {
     const content = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
     assert.ok(content.includes("Paid checkout and recurring billing are not available"), file + " must disclose unavailable checkout");
-    assert.ok(content.includes("products, prices and checkout integration are not configured"), file + " must distinguish approval from integration");
+    assert.ok(content.includes("payment activation is pending"), file + " must distinguish approval from integration");
     assert.ok(content.includes("Paddle is not approved for use"), file + " must disclose unapproved Paddle");
   }
   const pricing = fs.readFileSync(path.join(__dirname, "..", "pricing.html"), "utf8");
-  assert.ok(pricing.includes("Proposed $9") && pricing.includes("Proposed $19"), "Amounts must be labelled proposed");
+  assert.ok(pricing.includes("$9.99") && pricing.includes("$19.75"), "Amounts must match approved monthly prices");
 });
 
 test("Unapproved Paddle checkout stays inert even if old configuration remains", () => {
@@ -109,7 +109,7 @@ test("Unapproved Paddle checkout stays inert even if old configuration remains",
   const app = fs.readFileSync(path.join(__dirname, "..", "js/app.js"), "utf8");
   assert.ok(!home.includes("cdn.paddle.com"), "Must not load unapproved checkout SDK");
   assert.ok(!app.includes("Paddle.Checkout.open(") && !app.includes("Paddle.Initialize("), "Must not initialize or open Paddle checkout");
-  assert.ok(app.includes("Paid checkout is unavailable during pre-launch"), "Checkout actions must explain current state");
+  assert.ok(app.includes("Payments are being connected"), "Checkout actions must explain current state");
 });
 
 test("server.js defines /refund, /terms, /privacy, /contact, /about", () => {

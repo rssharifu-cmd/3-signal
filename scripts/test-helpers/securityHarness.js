@@ -111,7 +111,7 @@ function loader({ db, overrides = {}, fetchFn } = {}) {
       return actualRequire(id);
     }
     const context = vm.createContext({
-      console, process, Buffer, URL, URLSearchParams, Date, setTimeout, clearTimeout,
+      console, process, Buffer, URL, URLSearchParams, Date, setTimeout, clearTimeout, AbortSignal,
       fetch: (...args) => fetchFn ? fetchFn(...args) : global.fetch(...args),
     });
     const fn = vm.runInContext("(function(require,module,exports,__filename,__dirname){\n" + fs.readFileSync(abs, "utf8") + "\n})", context, { filename: abs });

@@ -35,7 +35,7 @@ function signSession(user) {
 }
 function publicUser(user) {
   const keys = ["_id", "email", "name", "plan", "profile", "settings", "memory", "watchdog", "trialStartedAt", "trialEndsAt",
-    "subscriptionStatus", "paddleSubscriptionStatus", "paddleCurrentPeriodEnd", "configurationReviewRequired", "emailVerifiedAt"];
+    "subscriptionStatus", "paddleSubscriptionStatus", "paddleCurrentPeriodEnd", "billingProvider", "lemonStatus", "lemonEndsAt", "lemonRenewsAt", "configurationReviewRequired", "emailVerifiedAt"];
   return { ...Object.fromEntries(keys.filter(k => user[k] !== undefined).map(k => [k, user[k]])), entitlements: getEntitlements(user) };
 }
 module.exports = { verified, requireAccount, signSession, publicUser };

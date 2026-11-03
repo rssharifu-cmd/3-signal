@@ -11,7 +11,7 @@ const PLAN_CONFIG = {
   analytics: {
     key: "analytics",
     name: "Analytics",
-    priceUsdMonthly: 9,
+    priceUsdMonthly: 9.99,
     providers: ["google_analytics"],
     urlInspection: false,
     description: "Daily automated monitoring for store traffic and conversion health via Google Analytics 4.",
@@ -28,7 +28,7 @@ const PLAN_CONFIG = {
   complete: {
     key: "complete",
     name: "Complete",
-    priceUsdMonthly: 19,
+    priceUsdMonthly: 19.75,
     providers: ["google_analytics", "google_search_console", "bing_webmaster"],
     urlInspection: true,
     description: "Full search and analytics monitoring: Google Analytics 4, Search Console, and Bing Webmaster.",
@@ -76,10 +76,16 @@ function normalizePlanKey(raw) {
  * @param {object} user
  * @returns {boolean}
  */
-function isPaidActive(user) {
+function isPaidActive(user, now = new Date()) {
   if (!user) return false;
   const planKey = normalizePlanKey(user.plan);
   if (!planKey) return false;
+  if (user.billingProvider === 'lemon') {
+    if (process.env.LEMON_ENABLED !== 'true' || user.lemonTestMode !== (process.env.LEMON_TEST_MODE !== 'false') || user.lemonRefunded) return false;
+    const end = user.lemonStatus === 'cancelled' ? user.lemonEndsAt :
+      user.lemonStatus === 'on_trial' ? user.lemonTrialEndsAt : user.lemonStatus === 'active' ? user.lemonRenewsAt : null;
+    return Boolean(end && new Date(end).getTime() > now.getTime());
+  }
 
   const status = (user.subscriptionStatus || user.paddleSubscriptionStatus || "").toLowerCase();
   if (status === "active" || status === "trialing") {
@@ -146,7 +152,7 @@ function getEntitlements(user, options = {}) {
   }
 
   // 2. PAID ACTIVE
-  if (isPaidActive(user)) {
+  if (isPaidActive(user, now)) {
     const planKey = normalizePlanKey(user.plan) || "complete";
     const planConfig = PLAN_CONFIG[planKey] || PLAN_CONFIG.complete;
 

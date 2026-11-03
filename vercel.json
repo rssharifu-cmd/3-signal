@@ -42,6 +42,8 @@
     { "source": "/api/watchdog", "destination": "/api/watchdog.js" },
     { "source": "/api/admin-status", "destination": "/api/admin-status.js" },
     { "source": "/api/paddle-webhook", "destination": "/api/paddle-webhook.js" },
+    { "source": "/api/billing", "destination": "/api/billing.js" },
+    { "source": "/api/lemon-webhook", "destination": "/api/lemon-webhook.js" },
     { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/privacy/", "destination": "/privacy.html" },
     { "source": "/terms", "destination": "/terms.html" },

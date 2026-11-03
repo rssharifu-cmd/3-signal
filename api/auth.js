@@ -19,8 +19,7 @@ module.exports = async function handler(req, res) {
   const url = new URL(req.url || "/api/auth", "https://sharflow.online");
   if (req.method === "GET" && (req.query?.action || url.searchParams.get("action")) === "config") {
     return res.status(200).json({ ok: true, googleClientId: clientId() || null, appOrigin: appOrigin(),
-      paddle: { env: process.env.PADDLE_ENV || "live", clientToken: process.env.PADDLE_CLIENT_TOKEN || null,
-        defaultPriceId: process.env.PADDLE_PRICE_ID_PRO || "pri_01m4tf8w6602rpfrhv9mbrcm7b" } });
+      billing: { provider: "lemon", enabled: require('./_lib/lemon').ready() } });
   }
   if (req.method === "GET") {
     const user = await requireAccount(req, res, { allowReview: true });
