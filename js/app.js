@@ -167,86 +167,60 @@ async function hydrateSession() {
   }
 }
 
-// ── Paddle Billing v2 Configuration & Checkout ─────────────────────────────
-const SHARFLOW_PRO_PRICE_ID = "pri_01m4tf8w6602rpfrhv9mbrcm7b";
-
-let cachedPaddleConfig = {
-  env: "live",
-  clientToken: null,
-  defaultPriceId: SHARFLOW_PRO_PRICE_ID,
-};
-let paddleInitialized = false;
-
-async function fetchPaddleConfig() {
+// Billing status is public; provider credentials remain on the server.
+let billingEnabled = false;
+async function fetchBillingConfig() {
   try {
-    const res = await fetch("/api/auth?action=config");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.googleClientId) {
-        cachedGoogleClientId = data.googleClientId;
-      }
-      if (data.paddle) {
-        cachedPaddleConfig.env = data.paddle.env || cachedPaddleConfig.env;
-        cachedPaddleConfig.clientToken = data.paddle.clientToken || cachedPaddleConfig.clientToken;
-        if (data.paddle.defaultPriceId) {
-          cachedPaddleConfig.defaultPriceId = data.paddle.defaultPriceId;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("Could not fetch configuration:", err.message);
-  }
+    const res = await fetch('/api/auth?action=config');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.googleClientId) cachedGoogleClientId = data.googleClientId;
+    billingEnabled = data.billing?.enabled === true;
+  } catch {}
 }
-
-async function initPaddle() {
-  // Paddle is not approved for Sharflow payments.
-  return false;
-}
-
-async function refreshUserPlanFromServer(retries = 4, delayMs = 2000) {
+async function refreshUserPlanFromServer(retries = 5, delayMs = 2000) {
   const token = localStorage.getItem(STORAGE.token);
   if (!token) return false;
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
+  for (let attempt = 0; attempt < retries; attempt++) {
     try {
-      const res = await fetch("/api/user", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch('/api/user', { headers: { Authorization: 'Bearer ' + token } });
       if (res.ok) {
         const data = await res.json();
         if (data.ok && data.user) {
           applyUserToLocalState(data.user);
           updateBillingPanelUI();
-          if (data.user.plan === "pro") {
-            toast("🎉 Subscription verified! Welcome to Sharflow Pro.");
+          if (data.user.entitlements?.status === 'active') {
+            toast('Subscription verified. Your plan is active.');
             return true;
           }
         }
       }
-    } catch (err) {
-      console.warn("[Paddle] Error refreshing user plan:", err.message);
-    }
-    if (attempt < retries) {
-      await new Promise((r) => setTimeout(r, delayMs));
-    }
+    } catch {}
+    if (attempt + 1 < retries) await new Promise(resolve => setTimeout(resolve, delayMs));
   }
+  toast('Payment confirmation is still pending. Your plan will update after verification.');
   return false;
 }
-
-function handlePaddleEvent(data) {
-  if (!data || !data.name) return;
-  console.log("[Paddle Event]", data.name);
-  if (data.name === "checkout.completed") {
-    toast("Checkout received! Verifying subscription activation with Paddle...");
-    // Refresh subscription status from server — never grant Pro directly from client
-    refreshUserPlanFromServer();
-  }
+let billingRequestPending = false;
+async function billingAction(action, plan) {
+  const token = localStorage.getItem(STORAGE.token);
+  if (!token) { openAuthModal('login'); return; }
+  if (billingRequestPending) return;
+  billingRequestPending = true;
+  try {
+    const res = await fetch('/api/billing', { method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ action, plan }) });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error || 'Billing is temporarily unavailable.'); return; }
+    const url = new URL(data.url);
+    if (url.protocol !== 'https:' || !(url.hostname === 'lemonsqueezy.com' || url.hostname.endsWith('.lemonsqueezy.com'))) throw Error('Invalid billing destination');
+    window.location.assign(url.href);
+  } catch { toast('Could not open billing. Please try again.'); }
+  finally { billingRequestPending = false; }
 }
-
-async function openPaddleCheckout() {
-  toast("Paid checkout is unavailable during pre-launch. Contact hello@sharflow.online for account assistance.");
-  return false;
-}
+function manageBilling() { return billingAction('portal'); }
+function openPaddleCheckout() { return startCheckout('complete'); }
 
 function getUserEntitlements() {
   if (currentUserEntitlements) return currentUserEntitlements;
@@ -306,10 +280,11 @@ function updateOverviewTrialBanner(entitlementsInput) {
   banner.classList.add("hidden");
 }
 
-function startCheckout(planKey) {
-  const normKey = planKey === "complete" ? "complete" : "analytics";
-  // Friendly notice as fallback if price ID is not configured
-  toast("Paid checkout is unavailable during pre-launch. Final prices will be confirmed before paid launch.");
+async function startCheckout(planKey) {
+  if (!['analytics', 'complete'].includes(planKey)) return;
+  await fetchBillingConfig();
+  if (!billingEnabled) { toast('Payments are being connected. Please try again later.'); return; }
+  return billingAction('checkout', planKey);
 }
 
 function checkoutSharflowPro() {
@@ -354,7 +329,7 @@ function updateBillingPanelUI() {
   if (statusType === "active") {
     const isComplete = planKey === "complete" || planKey === "pro" || planKey === "sharflow_pro";
     const planName = isComplete ? "Complete" : "Analytics";
-    const priceStr = isComplete ? "$19/mo" : "$9/mo";
+    const priceStr = isComplete ? "$19.75/mo" : "$9.99/mo";
 
     if (badge) {
       badge.textContent = `Current Plan: ${planName}`;
@@ -377,18 +352,19 @@ function updateBillingPanelUI() {
       actionContainer.innerHTML = `
         <div style="background:var(--green-soft);border:1px solid #A7F3D0;border-radius:6px;padding:12px;text-align:center;color:var(--green);font-weight:600;font-size:14px;">
           ✓ Subscribed to ${planName} (${priceStr})
+          <button class="btn btn-secondary" onclick="manageBilling()" style="margin-left:12px;">Manage subscription</button>
         </div>
       `;
     }
     if (analyticsCta) {
       analyticsCta.innerHTML = !isComplete
         ? `<div style="background:var(--green-soft);color:var(--green);font-weight:600;font-size:13px;padding:8px 12px;border-radius:6px;text-align:center;">Current Plan ✓</div>`
-        : `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Switch to Analytics ($9/mo)</button>`;
+        : `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Switch to Analytics ($9.99/mo)</button>`;
     }
     if (completeCta) {
       completeCta.innerHTML = isComplete
         ? `<div style="background:var(--green-soft);color:var(--green);font-weight:600;font-size:13px;padding:8px 12px;border-radius:6px;text-align:center;">Current Plan ✓</div>`
-        : `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Upgrade to Complete ($19/mo)</button>`;
+        : `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Upgrade to Complete ($19.75/mo)</button>`;
     }
     return;
   }
@@ -417,10 +393,10 @@ function updateBillingPanelUI() {
       `;
     }
     if (analyticsCta) {
-      analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Select Analytics ($9/mo)</button>`;
+      analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Select Analytics ($9.99/mo)</button>`;
     }
     if (completeCta) {
-      completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Select Complete ($19/mo)</button>`;
+      completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Select Complete ($19.75/mo)</button>`;
     }
     return;
   }
@@ -442,15 +418,15 @@ function updateBillingPanelUI() {
   if (actionContainer) {
     actionContainer.innerHTML = `
       <div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:6px;padding:12px;text-align:center;color:#DC2626;font-size:13px;line-height:1.5;">
-        Paid checkout is unavailable. Contact support about monitoring access.
+        Choose a plan below to resume monitoring.
       </div>
     `;
   }
   if (analyticsCta) {
-    analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Choose Analytics ($9/mo)</button>`;
+    analyticsCta.innerHTML = `<button class="btn btn-secondary btn-block" onclick="startCheckout('analytics')">Choose Analytics ($9.99/mo)</button>`;
   }
   if (completeCta) {
-    completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Choose Complete ($19/mo)</button>`;
+    completeCta.innerHTML = `<button class="btn btn-primary btn-block" onclick="startCheckout('complete')">Choose Complete ($19.75/mo)</button>`;
   }
 }
 
@@ -465,7 +441,7 @@ async function initGoogleSignIn() {
 
   try {
     if (!cachedGoogleClientId) {
-      await fetchPaddleConfig();
+      await fetchBillingConfig();
     }
     if (!cachedGoogleClientId) return;
 
@@ -2580,7 +2556,7 @@ function resetAll() {
 
 window.onload = async () => {
   if (verificationSetupActive) return;
-  // Check if returning from a Paddle checkout
+  // Check if returning from checkout
   try {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("checkout") === "success") {
@@ -2589,7 +2565,7 @@ window.onload = async () => {
       const newUrl = window.location.pathname + (newQuery ? `?${newQuery}` : "") + window.location.hash;
       window.history.replaceState(null, "", newUrl);
 
-      toast("Checkout received! Verifying subscription status with Paddle...");
+      toast("Checkout received. Verifying your subscription...");
       // Verify exclusively through server response — never assume Pro client-side
       refreshUserPlanFromServer();
     }
@@ -2607,8 +2583,8 @@ window.onload = async () => {
     } catch {}
   };
 
-  // Initialize Paddle client in background
-  initPaddle();
+  // Fetch payment availability in background
+  fetchBillingConfig();
 
   if (tryMigrateLegacy()) {
     showDashboard(new Date(localStorage.getItem(STORAGE.lock)), localStorage.getItem(STORAGE.profile));
@@ -3363,6 +3339,7 @@ window.toggleProfilePreferencesEditor = toggleProfilePreferencesEditor;
 window.renderProfilePreferencesEditor = renderProfilePreferencesEditor;
 window.saveProfilePreferences = saveProfilePreferences;
 window.openPaddleCheckout = openPaddleCheckout;
+window.manageBilling = manageBilling;
 window.startCheckout = startCheckout;
 window.checkoutSharflowPro = checkoutSharflowPro;
 window.updateBillingPanelUI = updateBillingPanelUI;
