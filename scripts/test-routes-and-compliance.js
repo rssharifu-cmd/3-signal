@@ -62,10 +62,10 @@ test("refund.html does not contain unapproved 14-day guarantee promises", () => 
     false,
     "refund.html must not promise a 14-day money-back guarantee without business approval"
   );
-  assert.ok(content.includes("Paid checkout and recurring billing are not available"), "Must disclose inactive billing");
-  assert.ok(content.includes("Lemon Squeezy account approval is complete"), "Must describe account approval accurately");
-  assert.ok(content.includes("payment activation is pending"), "Must disclose unconfigured integration");
-  assert.ok(content.includes("Paddle is not approved for use"), "Must not present Paddle as approved");
+  assert.ok(content.includes("Lemon Squeezy, our Merchant of Record"), "Must identify the configured billing provider");
+  assert.ok(content.includes("Cancel future renewals"), "Must describe cancellation");
+  assert.ok(content.includes("starts the paid subscription immediately"), "Must disclose when paid billing begins");
+  assert.ok(!content.includes("processed by Paddle"), "Must not identify unapproved Paddle as the active processor");
   assert.ok(content.includes("non-waivable statutory rights"), "Must preserve statutory consumer rights");
   assert.ok(!content.includes("Paddle.com Market Ltd"), "Must not identify unapproved Paddle as active merchant");
   assert.ok(content.includes("hello@sharflow.online"), "Must include support contact");
@@ -93,12 +93,12 @@ test("Footer contains /refund link on all main HTML pages", () => {
 
 console.log("\n=== 3. Verifying Routing Configurations ===");
 
-test("Pre-launch payment disclosures agree across public payment surfaces", () => {
+test("Billing disclosures agree across public payment surfaces", () => {
   for (const file of ["index.html", "pricing.html", "terms.html", "refund.html"]) {
     const content = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
-    assert.ok(content.includes("Paid checkout and recurring billing are not available"), file + " must disclose unavailable checkout");
-    assert.ok(content.includes("payment activation is pending"), file + " must distinguish approval from integration");
-    assert.ok(content.includes("Paddle is not approved for use"), file + " must disclose unapproved Paddle");
+    assert.ok(content.includes("Subscriptions are processed by Lemon Squeezy"), file + " must identify the billing provider");
+    assert.ok(content.includes("Paid billing starts when you complete checkout"), file + " must disclose the charge timing");
+    assert.ok(!content.includes("processed by Paddle"), file + " must not claim Paddle processing");
   }
   const pricing = fs.readFileSync(path.join(__dirname, "..", "pricing.html"), "utf8");
   assert.ok(pricing.includes("$9.99") && pricing.includes("$19.75"), "Amounts must match approved monthly prices");
