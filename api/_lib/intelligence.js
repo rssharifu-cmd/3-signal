@@ -1,24 +1,5 @@
-/**
- * Sharflow — AI Interpretation Layer
- *
- * The ONLY place an LLM is called in the Watchdog pipeline.
- *
- * Takes the findings array (which has already been detected and scored by
- * deterministic code) and produces:
- * 1. Plausible-cause explanations
- * 2. Priority ranking (P1-P4)
- * 3. 1-3 concrete recommended actions per finding
- * 4. Executive summary
- * 5. External research context integration (Tavily, RSS, Reddit)
- *
- * CRITICAL DIRECTIVE:
- * - If the findings array is empty, SKIP the AI call entirely and return
- *   a fixed "nothing important changed today" message.
- * - The AI never decides whether something is significant — only explains
- *   and prioritizes findings already flagged by code.
- */
+/** Sharflow — local rule-based interpretation of verified monitoring findings. */
 
-const { GoogleGenAI } = require("@google/genai");
 const { matchesUserPreferences } = require("./preferences");
 
 const FIXED_ALL_CLEAR = {
@@ -512,7 +493,7 @@ function buildDeterministicInterpretation(findings, userContext, externalResearc
 }
 
 /**
- * Interprets a verified findings array using Gemini Flash via @google/genai.
+ * Interprets verified findings locally using deterministic rules.
  *
  * @param {object} params
  * @param {Array<object>} params.findings - Deterministically flagged findings
@@ -537,151 +518,9 @@ async function interpretFindings({
     return buildNormalStateInterpretation({ usableProviders, unusableProviders });
   }
 
-  // ── STEP 2: CHECK FOR GEMINI API KEY ──────────────────────────────────────
-  const apiKey = (process.env.GEMINI_API_KEY || "").trim();
-  if (!apiKey) {
-    console.warn("[Intelligence] GEMINI_API_KEY not configured. Using deterministic fallback.");
-    return buildDeterministicInterpretation(findings, userContext, externalResearch);
-  }
-
-  // ── STEP 3: CALL GEMINI API ───────────────────────────────────────────────
-  try {
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "aistudio-build",
-        },
-      },
-    });
-
-    const websiteUrl = userContext.profile?.websiteUrl || userContext.websiteUrl || "the website";
-    const websiteType = userContext.profile?.websiteType || "Website";
-
-    const prompt = `
-You are the AI Business Intelligence engine for Sharflow, focused on e-commerce store owners.
-Your role: explain and prioritize findings that code algorithms have already flagged and verified from store analytics (GA4 primary, GSC/Bing secondary).
-DO NOT question or second-guess whether these findings are real. They have already cleared strict statistical noise floors and sustained-change checks.
-
-Website/Store: ${websiteUrl} (${websiteType})
-User Selected Monitoring Preferences: ${JSON.stringify(userContext.userPreferences || userContext.profile?.monitoringPriorities || [])}
-
-Verified Code Findings to Interpret (${findings.length} total):
-${JSON.stringify(findings, null, 2)}
-${externalResearch && externalResearch.length > 0 ? `
-External Research & Context (Official Search Central announcements, industry discussions, SERP volatility):
-${JSON.stringify(externalResearch, null, 2)}
-` : ""}
-CRITICAL E-COMMERCE INTELLIGENCE RULES:
-1. Clearly separate Evidence → What Changed → Possible Explanations → Recommended Action.
-2. "Possible explanations" MUST ALWAYS be presented as plausible hypotheses, NEVER as confirmed causes.
-   Example: Write "Payment gateway friction, unexpected shipping fee disclosures, or customer hesitation may contribute to checkout drop-offs."
-   DO NOT write: "The payment gateway caused the drop-off" unless direct error logs prove it.
-3. If verified AI referral traffic is present, use exact factual attribution wording: "Traffic attributed to [source/platform]". Never claim "AI recommended your store" unless data explicitly proves that statement.
-4. For e-commerce findings (revenue drops, checkout drop-offs, cart abandonment), focus recommendations on concrete store audits: testing checkout on mobile/desktop, checking payment decline logs, verifying shipping rate displays, and auditing product page layout.
-5. If external research is provided, incorporate relevant external context where directly applicable. Never fabricate numbers or sources.
-6. Respect the user's selected monitoring categories. Emphasize signals and recommendations directly related to those areas in your summary and ranking. Non-selected categories should only be highlighted if they represent critical outages or severe tracking disruption.
-
-Produce a JSON object matching this exact structure:
-{
-  "headline": "A concise, professional 6-12 word executive headline summarizing the findings for the store owner.",
-  "summary": "2-3 clear, executive sentences explaining what changed in store performance, why it matters, and overall posture.",
-  "overallHealth": "critical | needs_attention | steady",
-  "priorityRankedFindings": [
-    {
-      "findingId": "Exact ID matching the code finding",
-      "type": "Exact type matching the code finding",
-      "severity": "critical | warning | opportunity | info",
-      "priorityRank": 1,
-      "priorityBadge": "P1 · Immediate Action | P2 · High Priority | P3 · Moderate | P4 · Opportunity",
-      "title": "Clear, readable 1-line title for this issue",
-      "primaryCause": "1 sentence identifying the single most probable root cause",
-      "plausibleCauses": [
-        "Plausible cause 1 (technical SEO, algorithm update, content staleness, etc.)",
-        "Plausible cause 2",
-        "Plausible cause 3"
-      ],
-      "recommendedActions": [
-        {
-          "action": "Specific 1-sentence action item",
-          "detail": "Actionable explanation of exactly how to check or fix it",
-          "urgency": "immediate | this_week | routine"
-        }
-      ],
-      "impactAssessment": "Concise business impact assessment (lost traffic, revenue risk, or growth potential)"
-    }
-  ],
-  "topThreeNextSteps": [
-    "Immediate step 1",
-    "Immediate step 2",
-    "Immediate step 3"
-  ]
-}
-`.trim();
-
-    let response = null;
-    let modelUsed = "gemini-3.6-flash";
-
-    try {
-      response = await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
-    } catch (primaryErr) {
-      console.warn("[Intelligence] gemini-3.6-flash primary attempt warning:", primaryErr.message);
-      try {
-        modelUsed = "gemini-2.5-flash";
-        response = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-          },
-        });
-      } catch (fallbackErr) {
-        throw primaryErr; // Throw original error to trigger deterministic fallback
-      }
-    }
-
-    const text = response.text;
-    if (!text) {
-      throw new Error("Empty response from Gemini API");
-    }
-
-    const parsed = JSON.parse(text);
-
-    // Merge original code evidence into each ranked finding to preserve raw data
-    const findingMap = new Map(findings.map((f) => [f.id, f]));
-    if (Array.isArray(parsed.priorityRankedFindings)) {
-      parsed.priorityRankedFindings.forEach((rf) => {
-        const original = findingMap.get(rf.findingId);
-        if (original) {
-          rf.originalEvidence = original.evidence;
-          rf.confidence = original.confidence;
-          rf.scope = original.scope;
-        }
-      });
-    }
-
-    return {
-      status: parsed.overallHealth || "needs_attention",
-      headline: parsed.headline,
-      summary: parsed.summary,
-      priorityRankedFindings: parsed.priorityRankedFindings || [],
-      recommendedActions: parsed.topThreeNextSteps || [],
-      externalResearch: externalResearch || [],
-      interpretedAt: new Date(),
-      aiCallSkipped: false,
-      modelUsed,
-    };
-  } catch (err) {
-    console.error("[Intelligence Error] Gemini interpretation failed:", err.message);
-    // Fall back smoothly to deterministic interpretation
-    return buildDeterministicInterpretation(findings, userContext, externalResearch);
-  }
+  // Always interpret customer findings locally, including when a key exists.
+  return { ...buildDeterministicInterpretation(findings, userContext, []),
+    aiCallSkipped: true, usedFallback: false, interpretationMode: "deterministic" };
 }
 
 module.exports = {

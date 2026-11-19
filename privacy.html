@@ -277,7 +277,7 @@
 
         <h3>E. Derived Monitoring Findings and Reports</h3>
         <ul>
-          <li><strong>Derived Audit Results:</strong> Historical records of period-over-period comparisons, deterministically detected anomaly findings, priority rankings, AI-generated diagnostic hypotheses, and executive summaries stored in your account's intelligence reports.</li>
+          <li><strong>Derived Audit Results:</strong> Historical records of period-over-period comparisons, deterministically detected anomaly findings, priority rankings, rule-based diagnostic suggestions, and executive summaries stored in your account's intelligence reports.</li>
         </ul>
 
         <h3>F. Operational, Delivery, and Billing Records</h3>
@@ -339,9 +339,9 @@
         <p>In accordance with the Limited Use requirements:</p>
         <ul>
           <li><strong>Specific Use Only:</strong> We use Google Search Console and Google Analytics data strictly to provide and improve user-facing website performance monitoring, trend analysis, and alert reports requested by you.</li>
-          <li><strong>Third-Party Processing &amp; Transfers:</strong> We do not sell Google user data, nor do we transfer it to third parties, except as strictly necessary to provide the service (such as storing encrypted tokens, snapshots, and reports in our managed database MongoDB Atlas, delivering requested alert emails via Resend, and sending verified findings to the Google Gemini API or affected query terms to Tavily when triggered—see Sections 6 and 7), to comply with applicable laws, or as part of a merger or acquisition with notice.</li>
+          <li><strong>Third-Party Processing &amp; Transfers:</strong> We do not sell Google user data, nor do we transfer it to third parties, except as strictly necessary to provide the service (such as storing encrypted tokens, snapshots, and reports in our managed database MongoDB Atlas, delivering requested alert emails via Resend—see Sections 6 and 7), to comply with applicable laws, or as part of a merger or acquisition with notice.</li>
           <li><strong>No Advertising:</strong> We never use or transfer Google user data for serving advertisements, retargeting, personalized marketing, or interest-based targeting.</li>
-          <li><strong>No Model Training by Sharflow:</strong> Sharflow does not use Google Search Console or Google Analytics data to train its own machine learning or artificial intelligence models. For details on external Gemini API processing, see Section 6.</li>
+          <li><strong>No Model Training by Sharflow:</strong> Sharflow does not use Google Search Console or Google Analytics data to train its own machine learning or artificial intelligence models. Monitoring reports are generated locally as described in Section 6.</li>
           <li><strong>Restricted Human Access:</strong> No humans read your raw Google performance data unless: (a) you provide explicit consent to resolve a specific technical support issue, (b) it is required for security investigations or legal compliance, or (c) data is aggregated and anonymized for internal system performance auditing.</li>
         </ul>
       </section>
@@ -362,20 +362,9 @@
 
       <!-- Section 6 -->
       <section class="legal-section">
-        <h2>6. AI Processing of Verified Findings</h2>
-        <p>
-          Sharflow utilizes artificial intelligence (Google Gemini via server-side API calls) to summarize monitoring findings and generate diagnostic hypotheses. Our architecture follows a deterministic verification pipeline:
-        </p>
-        <div class="legal-callout">
-          <strong>Authorized Data</strong> → <strong>Metric Snapshots</strong> → <strong>Deterministic Anomaly Detection</strong> → <strong>Verified Findings</strong> → <strong>AI Hypotheses &amp; Prioritization</strong>
-        </div>
-        <ul>
-          <li><strong>Possible Interpretations, Not Proven Causes:</strong> The AI model does not invent raw analytics metrics. Deterministic code first detects baseline shifts that exceed configured thresholds, and the AI then provides possible interpretations (hypotheses) and suggested diagnostic steps. These explanations are not proven or confirmed root causes.</li>
-          <li><strong>Exact Prompt Payload Sent to Google Gemini:</strong> When findings are detected, Sharflow sends a structured prompt containing your configured website URL and website type, your selected monitoring priorities, the array of verified findings (including metric deltas, scopes, and evidence context, which may include affected page URLs, search queries, or URL inspection findings), and any external search context gathered for ranking anomalies.</li>
-          <li><strong>Credential Exclusion:</strong> Sharflow does not include user passwords, OAuth refresh tokens, or your Sharflow account email address in the Gemini interpretation prompt.</li>
-          <li><strong>Conditional Execution:</strong> If deterministic anomaly detection finds zero anomalies during an audit, the Google Gemini API call is skipped entirely.</li>
-          <li><strong>API Data Handling &amp; Training:</strong> Sharflow does not train its own AI models on your data. Prompts and responses transmitted to the Google Gemini API are governed by Google's Gemini API Terms of Service applicable to the billing tier configured for Sharflow's API project.</li>
-        </ul>
+        <h2>6. Rule-Based Report Processing</h2>
+        <p>Sharflow generates monitoring reports using server-side code. It compares authorized metrics across complete reporting periods, applies configured anomaly thresholds, ranks findings, and produces template-based explanations and suggested checks. Suggestions are possible explanations, not proven causes.</p>
+        <p>Customer analytics, revenue metrics, page URLs, search queries, and monitoring findings are not sent to Google Gemini or external research services during report generation. Sharflow does not use connected Google data to train AI models. Authorized metrics still pass through the hosting, database, source APIs, and requested email delivery services described below.</p>
       </section>
 
       <!-- Section 7 -->
@@ -388,9 +377,8 @@
           <li><strong>Vercel, Inc.:</strong> Hosts the web application and executes serverless API routes, processing incoming requests and generating operational server logs (which may record request status, error details, and account email addresses during diagnostics, but never OAuth refresh tokens or passwords).</li>
           <li><strong>MongoDB, Inc. (MongoDB Atlas):</strong> Managed cloud database storing account profiles, salted password hashes (if email/password login is used), monitoring preferences, encrypted OAuth refresh tokens, temporary OAuth attempt and rate-limit records, metric snapshots, URL inspection results, intelligence reports, delivery and send-guard records, and billing event records.</li>
           <li><strong>Resend, Inc.:</strong> Transactional email provider receiving your recipient email address, subject line, and email content (including inbox ownership verification links, welcome confirmations, or daily Watchdog report HTML containing your website URL, traffic/funnel/revenue summaries, attributed sources, detected findings, and suggested actions) to deliver emails from <span class="code-tag">hello@sharflow.online</span>.</li>
-          <li><strong>Google LLC:</strong> Provides Google Sign-In identity verification, OAuth authorization, Google Search Console and Google Analytics 4 APIs, and the server-side Google Gemini API (which receives the prompt payload described in Section 6 when anomalies are detected).</li>
+          <li><strong>Google LLC:</strong> Provides Google Sign-In identity verification, OAuth authorization, Google Search Console and Google Analytics 4 APIs.</li>
           <li><strong>Microsoft Corporation:</strong> Provides OAuth authorization and the Bing Webmaster Tools API for reading verified site search and crawl statistics.</li>
-          <li><strong>Tavily:</strong> When search-ranking or organic-traffic anomalies are detected and web research is enabled, Sharflow sends the top affected search query or keyword term (and, if configured by you, your primary competitor domain) to the Tavily Search API to retrieve public search-volatility context.</li>
           <li><strong>Lemon Squeezy (Payment Processing &amp; Merchant of Record):</strong> Handles paid checkout, payment card details, tax calculation, invoicing, and the subscription billing portal. When you initiate paid checkout or manage a subscription, Sharflow directs you to Lemon Squeezy's hosted checkout or buyer portal and stores server-side checkout bindings, Lemon Squeezy customer, subscription, and variant identifiers, subscription status and renewal/expiry timestamps, invoice refund status, and webhook event records in Sharflow's database to synchronize plan access.</li>
           <li><strong>Scheduled Automation, Backups &amp; Client Assets:</strong> Scheduled monitoring and backup workflows run via GitHub Actions when enabled. Where automated database backups are enabled, encrypted (AES-256-GCM) database backup archives are stored in private Cloudflare R2 object storage. Your browser also loads standard runtime resources (such as Google Identity Services and Google Fonts) directly when using the web app.</li>
         </ul>

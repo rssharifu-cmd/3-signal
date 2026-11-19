@@ -20,7 +20,7 @@
     "test:plans": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-plans.js",
     "test:research:isolated": "node --require ./scripts/test-helpers/noNetwork.js scripts/test-research.js",
     "check:security-indexes": "node scripts/check-security-indexes.js",
-    "test:evidence": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-report-evidence.js",
+    "test:evidence": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-report-evidence.js scripts/test-code-only-reports.js",
     "test:rendering": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-report-rendering.js",
     "test:delivery": "node --require ./scripts/test-helpers/noNetwork.js --test scripts/test-daily-delivery.js"
   },
