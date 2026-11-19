@@ -209,7 +209,7 @@
       <div class="hero-eyebrow">Transparency &amp; Privacy</div>
       <h1 class="legal-title">Privacy Policy</h1>
       <div class="legal-meta">
-        <span><strong>Last updated:</strong> September 21, 2026</span>
+        <span><strong>Last updated:</strong> November 19, 2026</span>
         <span>·</span>
         <span><strong>Effective date:</strong> September 21, 2026</span>
         <span>·</span>
@@ -221,7 +221,7 @@
     <div class="legal-summary-card">
       <h3>Summary at a Glance</h3>
       <p>
-        Sharflow is an AI Website Watchdog that monitors website performance and search visibility. When you connect Google Search Console, Google Analytics 4, or Bing Webmaster Tools, we access authorized performance metrics to detect meaningful changes and deliver concise intelligence alerts. We <strong>never</strong> see, request, or store your passwords. All OAuth refresh tokens are encrypted at rest using AES-256-GCM. We never sell your data, never serve ads, and never use your private data to train generalized AI models.
+        Sharflow is an AI Website Watchdog that monitors website performance and search visibility. When you connect Google Search Console, Google Analytics 4, or Bing Webmaster Tools, we access authorized reporting metrics, dimensions, and derived findings to detect meaningful changes and deliver concise intelligence alerts. We <strong>never</strong> request or receive your Google or Microsoft account passwords; if you choose Sharflow email/password login, we process that password solely to authenticate you and store a cryptographic password hash. All stored OAuth refresh tokens are encrypted at rest using AES-256-GCM. Sharflow never sells your data, never serves ads, and does not train its own AI models on your Google data.
       </p>
     </div>
 
@@ -246,46 +246,49 @@
           We collect only the information required to deliver automated monitoring, authenticate your account, and operate the platform:
         </p>
 
-        <h3>A. Account and Profile Information</h3>
+        <h3>A. Account, Identity, and Profile Information</h3>
         <ul>
-          <li><strong>Contact &amp; Account Details:</strong> Display name and email address, used as your unique login identifier, for transactional monitoring notifications, and account recovery.</li>
-          <li><strong>Password Credentials:</strong> Salted and hashed using the industry-standard <code>bcrypt</code> cryptographic algorithm (10 rounds). Plain-text passwords are never recorded, accessible, or stored.</li>
+          <li><strong>Contact &amp; Account Details:</strong> Display name and email address, used as your unique login identifier, for transactional monitoring notifications, and for account communications.</li>
+          <li><strong>Google Sign-In Identity:</strong> If you choose "Continue with Google", Sharflow verifies your Google ID token and stores your email address, display name, and Google account identifier (<span class="code-tag">googleSub</span>). Sharflow never requests or receives your Google account password.</li>
+          <li><strong>Optional Sharflow Email/Password Login:</strong> If you choose to create or sign in with a Sharflow email and password, Sharflow sends a time-limited verification link to confirm email ownership, processes the password you choose solely to authenticate your account, and stores a salted cryptographic password hash. Plain-text passwords are never stored.</li>
         </ul>
 
         <h3>B. Website Monitoring Configuration</h3>
         <ul>
-          <li><strong>Monitoring Preferences:</strong> Primary website URL, site category, monitoring priorities, high-priority pages, tracked competitors (if provided), and notification preferences.</li>
-          <li><strong>Operational State:</strong> Status flags and timestamps recording when your website was last audited.</li>
+          <li><strong>Monitoring Preferences:</strong> Primary website URL, site category and purpose, monitoring priorities, important pages (if provided), tracked competitor URLs (if provided), and email notification preferences.</li>
+          <li><strong>Operational State:</strong> Status flags and timestamps recording when your website was last audited and your trial or subscription state.</li>
         </ul>
 
-        <h3>C. Connected Datasource Information</h3>
+        <h3>C. Connected Datasource Information &amp; OAuth Credentials</h3>
         <ul>
-          <li><strong>Provider Identification:</strong> Connected provider name (Google Search Console, Google Analytics 4, or Bing Webmaster Tools), verified property ID, and property URL.</li>
+          <li><strong>Provider Identification:</strong> Connected provider name (Google Search Console, Google Analytics 4, or Bing Webmaster Tools), selected property or site ID, property name, and property URL.</li>
           <li><strong>Granted Scopes:</strong> The list of OAuth permissions granted during the provider authorization step.</li>
-          <li><strong>Encrypted OAuth Refresh Tokens:</strong> Refresh tokens are encrypted at rest using <strong>AES-256-GCM</strong> authenticated encryption with a unique 12-byte initialization vector (IV) and authentication tag. Plain-text refresh tokens are never stored in plain text and are never returned to client browsers.</li>
-          <li><strong>Account Synchronization Metadata:</strong> Associated provider email address and timestamps of the most recent synchronization.</li>
+          <li><strong>Encrypted OAuth Refresh Tokens:</strong> OAuth refresh tokens are encrypted at rest using <strong>AES-256-GCM</strong> authenticated encryption with a unique 12-byte initialization vector (IV) and authentication tag. Refresh tokens are never stored in plain text and are never returned to client browsers.</li>
+          <li><strong>Account Synchronization Metadata:</strong> Associated provider email address (retrieved via Google identity scopes) and timestamps of the most recent synchronization.</li>
         </ul>
 
-        <h3>D. Aggregated Performance Metrics</h3>
+        <h3>D. Reporting Metrics, Dimensions, and Page/Query Data</h3>
         <ul>
-          <li><strong>Aggregated Metric Values:</strong> Aggregate counts and averages for search impressions, clicks, click-through rates (CTR), average search positions, sessions, active users, and conversions retrieved via authorized APIs.</li>
-          <li><strong>Aggregated Dimensions:</strong> Top search query strings and top landing page paths associated with aggregate performance.</li>
-          <li><strong>Aggregated Data Focus:</strong> Sharflow utilizes aggregated performance metrics provided by connected search and analytics APIs. We do not intentionally request, record, or track individual visitor names, personal profiles, or individual visitor browsing histories from your connected properties.</li>
+          <li><strong>Google Analytics 4 (GA4) Metrics &amp; Dimensions:</strong> Property metadata (<span class="code-tag">accountSummaries</span>); daily traffic and engagement counts and averages (sessions, total users, new users, derived returning users, screen page views, engagement rate, user engagement duration, and bounce rate); e-commerce and conversion metrics and events (purchases, purchase revenue, items viewed, added to cart, and checked out, plus event names, counts, and values); traffic attribution (<span class="code-tag">sessionSource</span>, <span class="code-tag">sessionMedium</span>, <span class="code-tag">sessionCampaignName</span>, including AI-platform referral classification); landing-page paths including query strings (<span class="code-tag">landingPagePlusQueryString</span>, or <span class="code-tag">pagePath</span> fallback); and device category and country breakdowns.</li>
+          <li><strong>Google Search Console Metrics, Dimensions &amp; URL Inspection:</strong> Verified site entries (<span class="code-tag">siteUrl</span>, <span class="code-tag">permissionLevel</span>); daily search performance metrics (clicks, impressions, click-through rate, and average position); top search <span class="code-tag">query</span> strings and top <span class="code-tag">page</span> URLs; and, for eligible plans, weekly URL Inspection checks (up to 10 selected URLs from your site root, configured important pages, top Search Console pages, or <span class="code-tag">sitemap.xml</span>) retrieving indexing verdicts, coverage, <span class="code-tag">robots.txt</span> state, indexing/fetch state, last crawl time, canonical URLs, crawl user agent, and mobile usability verdict/issues.</li>
+          <li><strong>Bing Webmaster Tools Metrics &amp; Dimensions:</strong> Verified site list, rank and traffic stats (clicks, impressions, average position), search query statistics, crawl statistics, and reported crawl issues.</li>
+          <li><strong>Identifiability Notice:</strong> While Sharflow retrieves aggregate reporting statistics rather than individual visitor profiles, page URLs, landing-page URLs with query strings, and search query strings may contain personal or identifying information (such as names, email parameters, order or session tokens, or specific search terms). Accordingly, Sharflow does not treat URL or query-string data as anonymous.</li>
         </ul>
 
-        <h3>E. Monitoring Findings and Reports</h3>
+        <h3>E. Derived Monitoring Findings and Reports</h3>
         <ul>
-          <li><strong>Audit Results:</strong> Historical records of generated watchdog reports, detected anomaly findings, mathematical baseline shifts, priority-ranked recommendations, and executive summaries.</li>
+          <li><strong>Derived Audit Results:</strong> Historical records of period-over-period comparisons, deterministically detected anomaly findings, priority rankings, AI-generated diagnostic hypotheses, and executive summaries stored in your account's intelligence reports.</li>
         </ul>
 
-        <h3>F. Operational and Delivery Records</h3>
+        <h3>F. Operational, Delivery, and Billing Records</h3>
         <ul>
-          <li><strong>Delivery Telemetry:</strong> Scheduler execution timestamps and delivery locks ensuring scheduled monitoring routines execute reliably without duplicate alert dispatches.</li>
+          <li><strong>Delivery Records &amp; Send Guards:</strong> Scheduler delivery claims, cached report/email preparation payloads, Resend idempotency keys, and execution logs (<span class="code-tag">daily_deliveries</span>, legacy <span class="code-tag">delivery_logs</span>, and <span class="code-tag">email_send_guards</span>) used to ensure reliable delivery and prevent duplicate notifications.</li>
+          <li><strong>Subscription &amp; Billing Records:</strong> Plan and 14-day no-card app trial timestamps, server-side checkout binding hashes, and Lemon Squeezy customer, subscription, variant, status, renewal/expiry, invoice refund, and billing event ledger records (<span class="code-tag">billing_events</span>) used to synchronize paid access.</li>
         </ul>
 
-        <h3>G. Temporary OAuth and Security State</h3>
+        <h3>G. Temporary OAuth, Verification, and Rate-Limit State</h3>
         <ul>
-          <li><strong>State Verification Tokens:</strong> Cryptographically random state and CSRF verification tokens generated during active OAuth connection handshakes, purged after the authorization flow completes.</li>
+          <li><strong>State Verification &amp; Rate-Limit Records:</strong> Signed state tokens, browser state cookies (<span class="code-tag">sharflow_oauth_attempt</span>), and temporary <span class="code-tag">oauth_attempts</span> records created with a 20-minute expiration timestamp when you initiate an OAuth connection. Completed or verified callbacks atomically delete the matching <span class="code-tag">oauth_attempts</span> record. Sharflow also stores hashed rate-limit counters (<span class="code-tag">auth_rate_limits</span>) with expiration windows and time-limited email verification challenge hashes to protect account security.</li>
         </ul>
       </section>
 
@@ -301,17 +304,17 @@
           <li>
             <span class="code-tag">https://www.googleapis.com/auth/webmasters.readonly</span>
             <br />
-            <strong>Purpose:</strong> Read-only access to Google Search Console performance data (clicks, impressions, click-through rates, average query rankings, and verified property list) to detect organic traffic drops and momentum shifts.
+            <strong>Purpose:</strong> Read-only access to Google Search Console property listings, search performance metrics (clicks, impressions, CTR, average position, queries, and pages), and URL Inspection diagnostics to monitor organic visibility and indexing issues.
           </li>
           <li>
             <span class="code-tag">https://www.googleapis.com/auth/analytics.readonly</span>
             <br />
-            <strong>Purpose:</strong> Read-only access to Google Analytics 4 reporting data (sessions, active users, and engagement metrics) to assess website engagement trends.
+            <strong>Purpose:</strong> Read-only access to Google Analytics 4 account summaries and reporting data (traffic, engagement, conversion/e-commerce events, revenue, traffic sources/campaigns, landing-page URLs with query strings, device category, and country) to monitor website and store performance.
           </li>
           <li>
             <span class="code-tag">openid</span>, <span class="code-tag">email</span>, <span class="code-tag">profile</span>
             <br />
-            <strong>Purpose:</strong> Standard Google Identity scopes used to verify account identity and confirm ownership during the OAuth consent flow.
+            <strong>Purpose:</strong> Standard Google Identity scopes used to identify which Google account you are connecting (such as displaying the connected Google email address in your dashboard). These identity scopes identify the Google account only and do not independently prove website ownership.
           </li>
         </ul>
 
@@ -320,7 +323,7 @@
           <li>
             <span class="code-tag">webmaster.manage</span>
             <br />
-            <strong>Purpose:</strong> The official OAuth scope required by Microsoft to communicate with the Bing Webmaster API. Although Microsoft designates this scope as "manage", Sharflow utilizes this access solely to perform read queries for search performance (impressions, clicks, and search query data). Sharflow does not modify your Bing Webmaster settings, submit disavow files, or alter site ownership configurations.
+            <strong>Purpose:</strong> The OAuth scope required by Microsoft to query the Bing Webmaster API. Although Microsoft labels this scope "manage", Sharflow uses this access solely to perform read queries for verified sites, search performance (clicks, impressions, queries), crawl stats, and crawl issues. Sharflow does not modify your Bing Webmaster settings, submit disavow files, or alter site configurations.
           </li>
         </ul>
       </section>
@@ -335,10 +338,10 @@
         </div>
         <p>In accordance with the Limited Use requirements:</p>
         <ul>
-          <li><strong>Specific Use Only:</strong> We use Google Search Console and Google Analytics data strictly to provide user-facing website performance monitoring, trend analysis, and alert reports.</li>
-          <li><strong>Third-Party Processing &amp; Transfers:</strong> We do not sell Google user data, nor do we transfer it to third parties, except as strictly necessary to operate the service (specifically, transmitting encrypted data to our managed database provider MongoDB Atlas for storage and calling server-side Google Gemini APIs to summarize verified findings), comply with applicable laws, or as part of a merger or acquisition with explicit notice.</li>
+          <li><strong>Specific Use Only:</strong> We use Google Search Console and Google Analytics data strictly to provide and improve user-facing website performance monitoring, trend analysis, and alert reports requested by you.</li>
+          <li><strong>Third-Party Processing &amp; Transfers:</strong> We do not sell Google user data, nor do we transfer it to third parties, except as strictly necessary to provide the service (such as storing encrypted tokens, snapshots, and reports in our managed database MongoDB Atlas, delivering requested alert emails via Resend, and sending verified findings to the Google Gemini API or affected query terms to Tavily when triggered—see Sections 6 and 7), to comply with applicable laws, or as part of a merger or acquisition with notice.</li>
           <li><strong>No Advertising:</strong> We never use or transfer Google user data for serving advertisements, retargeting, personalized marketing, or interest-based targeting.</li>
-          <li><strong>No Generalized Model Training:</strong> We never use Google Search Console or Google Analytics data to train generalized machine learning or artificial intelligence models.</li>
+          <li><strong>No Model Training by Sharflow:</strong> Sharflow does not use Google Search Console or Google Analytics data to train its own machine learning or artificial intelligence models. For details on external Gemini API processing, see Section 6.</li>
           <li><strong>Restricted Human Access:</strong> No humans read your raw Google performance data unless: (a) you provide explicit consent to resolve a specific technical support issue, (b) it is required for security investigations or legal compliance, or (c) data is aggregated and anonymized for internal system performance auditing.</li>
         </ul>
       </section>
@@ -361,32 +364,35 @@
       <section class="legal-section">
         <h2>6. AI Processing of Verified Findings</h2>
         <p>
-          Sharflow utilizes artificial intelligence (specifically Google Gemini via the server-side API) to synthesize actionable summaries and explanations from your website's monitoring findings. Our architecture follows a strict verification pipeline:
+          Sharflow utilizes artificial intelligence (Google Gemini via server-side API calls) to summarize monitoring findings and generate diagnostic hypotheses. Our architecture follows a deterministic verification pipeline:
         </p>
         <div class="legal-callout">
-          <strong>Real Data</strong> → <strong>Metric Snapshots</strong> → <strong>Deterministic Anomaly Detection</strong> → <strong>Verified Findings</strong> → <strong>AI Interpretation</strong>
+          <strong>Authorized Data</strong> → <strong>Metric Snapshots</strong> → <strong>Deterministic Anomaly Detection</strong> → <strong>Verified Findings</strong> → <strong>AI Hypotheses &amp; Prioritization</strong>
         </div>
         <ul>
-          <li><strong>Findings Interpretation, Not Data Generation:</strong> The AI model does not independently invent raw analytics metrics. Instead, mathematical code algorithms first detect and verify significant baseline shifts (e.g., a sustained drop in clicks, impressions, or keyword positions). The AI is then asked to explain the likely cause and prioritize actionable recommendations.</li>
-          <li><strong>Aggregated Findings Input:</strong> The AI model receives only the verified findings (such as percentage shifts, query/page scopes, and metric context), your stated website type, and monitoring priorities.</li>
-          <li><strong>Credential Protection:</strong> Sharflow does not intentionally send passwords, OAuth refresh tokens, or personal account credentials to the AI model.</li>
-          <li><strong>Conditional Execution:</strong> If code algorithms detect zero anomalies or significant shifts during an audit, the AI API call is bypassed entirely.</li>
-          <li><strong>No Generalized Model Training:</strong> API requests are processed through commercial API interfaces and are not used to train generalized foundation models.</li>
+          <li><strong>Possible Interpretations, Not Proven Causes:</strong> The AI model does not invent raw analytics metrics. Deterministic code first detects baseline shifts that exceed configured thresholds, and the AI then provides possible interpretations (hypotheses) and suggested diagnostic steps. These explanations are not proven or confirmed root causes.</li>
+          <li><strong>Exact Prompt Payload Sent to Google Gemini:</strong> When findings are detected, Sharflow sends a structured prompt containing your configured website URL and website type, your selected monitoring priorities, the array of verified findings (including metric deltas, scopes, and evidence context, which may include affected page URLs, search queries, or URL inspection findings), and any external search context gathered for ranking anomalies.</li>
+          <li><strong>Credential Exclusion:</strong> Sharflow does not include user passwords, OAuth refresh tokens, or your Sharflow account email address in the Gemini interpretation prompt.</li>
+          <li><strong>Conditional Execution:</strong> If deterministic anomaly detection finds zero anomalies during an audit, the Google Gemini API call is skipped entirely.</li>
+          <li><strong>API Data Handling &amp; Training:</strong> Sharflow does not train its own AI models on your data. Prompts and responses transmitted to the Google Gemini API are governed by Google's Gemini API Terms of Service applicable to the billing tier configured for Sharflow's API project.</li>
         </ul>
       </section>
 
       <!-- Section 7 -->
       <section class="legal-section">
-        <h2>7. Third-Party Service Providers (Subprocessors)</h2>
+        <h2>7. Third-Party Service Providers &amp; Data Transfers</h2>
         <p>
-          To deliver the Service, Sharflow relies on third-party cloud infrastructure providers. Because the operator is based in Saudi Arabia while these cloud providers operate globally distributed infrastructure, your information may be processed and stored on servers located outside Saudi Arabia. These providers include:
+          To deliver the Service, Sharflow relies on third-party infrastructure and service providers. Because the operator is based in Saudi Arabia while these providers operate globally distributed cloud infrastructure, your information may be processed and stored outside Saudi Arabia. Based on the current application implementation, these providers and the data they receive are:
         </p>
         <ul>
-          <li><strong>Google LLC:</strong> Provides OAuth authentication services, Google Search Console API, Google Analytics API, and server-side Gemini AI for intelligence summarization.</li>
-          <li><strong>Microsoft Corporation:</strong> Provides OAuth authentication and Bing Webmaster Tools API for search performance querying.</li>
-          <li><strong>MongoDB, Inc. (MongoDB Atlas):</strong> Managed cloud database hosting with encrypted storage at rest for account details, configurations, encrypted tokens, metric snapshots, and reports.</li>
-          <li><strong>Vercel, Inc.:</strong> Application hosting, serverless execution runtime, and edge network routing.</li>
-          <li><strong>Resend, Inc.:</strong> Transactional email delivery service used to dispatch alert briefs and account notifications from <span class="code-tag">hello@sharflow.online</span>.</li>
+          <li><strong>Vercel, Inc.:</strong> Hosts the web application and executes serverless API routes, processing incoming requests and generating operational server logs (which may record request status, error details, and account email addresses during diagnostics, but never OAuth refresh tokens or passwords).</li>
+          <li><strong>MongoDB, Inc. (MongoDB Atlas):</strong> Managed cloud database storing account profiles, salted password hashes (if email/password login is used), monitoring preferences, encrypted OAuth refresh tokens, temporary OAuth attempt and rate-limit records, metric snapshots, URL inspection results, intelligence reports, delivery and send-guard records, and billing event records.</li>
+          <li><strong>Resend, Inc.:</strong> Transactional email provider receiving your recipient email address, subject line, and email content (including inbox ownership verification links, welcome confirmations, or daily Watchdog report HTML containing your website URL, traffic/funnel/revenue summaries, attributed sources, detected findings, and suggested actions) to deliver emails from <span class="code-tag">hello@sharflow.online</span>.</li>
+          <li><strong>Google LLC:</strong> Provides Google Sign-In identity verification, OAuth authorization, Google Search Console and Google Analytics 4 APIs, and the server-side Google Gemini API (which receives the prompt payload described in Section 6 when anomalies are detected).</li>
+          <li><strong>Microsoft Corporation:</strong> Provides OAuth authorization and the Bing Webmaster Tools API for reading verified site search and crawl statistics.</li>
+          <li><strong>Tavily:</strong> When search-ranking or organic-traffic anomalies are detected and web research is enabled, Sharflow sends the top affected search query or keyword term (and, if configured by you, your primary competitor domain) to the Tavily Search API to retrieve public search-volatility context.</li>
+          <li><strong>Lemon Squeezy (Payment Processing &amp; Merchant of Record):</strong> Handles paid checkout, payment card details, tax calculation, invoicing, and the subscription billing portal. When you initiate paid checkout or manage a subscription, Sharflow directs you to Lemon Squeezy's hosted checkout or buyer portal and stores server-side checkout bindings, Lemon Squeezy customer, subscription, and variant identifiers, subscription status and renewal/expiry timestamps, invoice refund status, and webhook event records in Sharflow's database to synchronize plan access.</li>
+          <li><strong>Scheduled Automation, Backups &amp; Client Assets:</strong> Scheduled monitoring and backup workflows run via GitHub Actions when enabled. Where automated database backups are enabled, encrypted (AES-256-GCM) database backup archives are stored in private Cloudflare R2 object storage. Your browser also loads standard runtime resources (such as Google Identity Services and Google Fonts) directly when using the web app.</li>
         </ul>
       </section>
 
@@ -394,38 +400,43 @@
       <section class="legal-section">
         <h2>8. Data Retention</h2>
         <p>
-          Sharflow retains your information only for as long as reasonably necessary to fulfill the purposes described in this Privacy Policy:
+          Sharflow retains information as necessary to operate the Service and maintain historical monitoring continuity:
         </p>
         <ul>
-          <li><strong>Account and Profile Information:</strong> Retained for the duration of your active account to maintain your monitoring settings, preferences, and service access.</li>
-          <li><strong>Encrypted OAuth Tokens:</strong> Retained until you disconnect the connected data source via your dashboard or request account deletion.</li>
-          <li><strong>Aggregated Metrics and Intelligence Reports:</strong> Retained as reasonably necessary to provide the service, compute period-over-period baseline comparisons (such as day-over-day, week-over-week, and multi-week trends), maintain historical audit records, and ensure continuous monitoring continuity. Automated deletion intervals are not currently enforced by the database.</li>
-          <li><strong>Operational and Delivery Records:</strong> Retained as reasonably necessary to maintain operational reliability, prevent duplicate notification delivery, diagnose technical issues, and satisfy security or legal obligations.</li>
+          <li><strong>Account and Profile Information:</strong> Retained while your account remains active, or until a verified account deletion request is completed.</li>
+          <li><strong>Encrypted OAuth Refresh Tokens:</strong> Stored in <span class="code-tag">datasources</span> records. Because Google Search Console and Google Analytics 4 share a Google authorization record when connected under the same Google account, an encrypted Google refresh token can remain stored on the other Google datasource record until you disconnect <em>both</em> Google sources in Sharflow or revoke access in your Google Account settings.</li>
+          <li><strong>Historical Snapshots, Inspections, and Reports:</strong> <span class="code-tag">metric_snapshots</span>, <span class="code-tag">url_inspections</span>, and <span class="code-tag">intelligence_reports</span> remain stored in the database after you disconnect a data source or cancel a subscription so historical baselines and past reports remain available unless you request account deletion.</li>
+          <li><strong>Temporary Security, Delivery, and Billing Records:</strong> Completed OAuth callbacks atomically delete matching <span class="code-tag">oauth_attempts</span> records; uncompleted OAuth attempts, rate-limit counters (<span class="code-tag">auth_rate_limits</span>), email verification challenges, and temporary checkout bindings carry application expiration timestamps (and expire automatically where database time-to-live indexes are configured). Delivery deduplication records (<span class="code-tag">daily_deliveries</span> / legacy <span class="code-tag">delivery_logs</span>), <span class="code-tag">email_send_guards</span>, and <span class="code-tag">billing_events</span> records are retained as needed for duplicate-send prevention, billing reconciliation, fraud prevention, or legal compliance. Where automated encrypted backups are enabled, backup archives are retained in private object storage according to the configured storage lifecycle.</li>
         </ul>
       </section>
 
       <!-- Section 9 -->
       <section class="legal-section">
-        <h2>9. Disconnecting Datasources &amp; Account Deletion</h2>
-        <p>You maintain control over your connected accounts and personal information:</p>
+        <h2>9. Disconnecting Datasources, Cancelling Billing &amp; Deleting Your Account</h2>
+        <p>Each control action has a distinct effect in Sharflow:</p>
 
         <h3>A. Disconnecting a Datasource in Sharflow</h3>
         <p>
-          You can disconnect any integration at any time from your Sharflow dashboard settings. When you initiate a disconnect, Sharflow clears the stored encrypted refresh token and associated property configuration for that provider, preventing further automated queries.
+          You can disconnect an integration in your dashboard settings. Disconnecting clears the stored encrypted refresh token and selected property on that specific provider's datasource record in Sharflow, stopping monitoring queries for that provider. Disconnecting does <strong>not</strong> automatically call Google or Microsoft's remote OAuth revocation endpoints, does <strong>not</strong> clear a shared Google refresh token stored on another connected Google service record unless you disconnect both Google Search Console and Google Analytics 4, and does <strong>not</strong> delete previously stored metric snapshots, URL inspections, or intelligence reports.
         </p>
 
         <h3>B. Revoking Access Directly with Google or Microsoft</h3>
         <p>
-          You can also revoke Sharflow's access directly at any time from your provider account settings:
+          To revoke Sharflow's OAuth permission directly at the provider level at any time:
         </p>
         <ul>
           <li><strong>Google:</strong> Visit <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;">Google Account Third-Party Access</a>, select Sharflow, and click <strong>"Remove Access"</strong>.</li>
           <li><strong>Microsoft:</strong> Visit <a href="https://account.live.com/consent/Manage" target="_blank" rel="noopener noreferrer" style="color:var(--accent);text-decoration:underline;">Microsoft Account Privacy Consent</a> to revoke Bing Webmaster permissions.</li>
         </ul>
 
-        <h3>C. Account &amp; Data Deletion Requests</h3>
+        <h3>C. Cancelling a Paid Subscription</h3>
         <p>
-          To delete your Sharflow account and associated records, email us at <a href="mailto:hello@sharflow.online" style="color:var(--accent);font-weight:600;">hello@sharflow.online</a> with the subject line <code>"Data Deletion Request"</code> from your registered email address. Following verification of account ownership, we will delete your user profile, monitoring configuration, connected datasource records, metric snapshots, and generated reports, subject to any records we are legally required to retain for security or compliance purposes.
+          Cancelling a paid subscription stops future recurring billing charges and retains paid access until the subscription expiry date shown in the billing portal (see our <a href="/terms" style="color:var(--accent);">Terms of Service</a> and <a href="/refund" style="color:var(--accent);">Refund Policy</a>). Cancelling billing does <strong>not</strong> delete your Sharflow account, connected datasource records, or historical reports.
+        </p>
+
+        <h3>D. Account &amp; Data Deletion Requests (Manual Verification)</h3>
+        <p>
+          Sharflow does not currently provide a self-service account deletion button in the dashboard. To request deletion of your Sharflow account and associated data, email <a href="mailto:hello@sharflow.online" style="color:var(--accent);font-weight:600;">hello@sharflow.online</a> from your registered email address with the subject line <code>"Data Deletion Request"</code>. Once we verify your account ownership, we will manually delete your user profile, datasource records and encrypted tokens, temporary OAuth state records, metric snapshots, URL inspection records, and intelligence reports, subject to limited retention of billing, duplicate-prevention, security, or operational records required for payment reconciliation, fraud prevention, or legal compliance.
         </p>
       </section>
 
